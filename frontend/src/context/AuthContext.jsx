@@ -56,11 +56,16 @@ export function AuthProvider({ children }) {
     setIsAuthenticated(false);
   }, []);
 
+  const refreshToken = useCallback(async () => {
+    await loadCurrentUser();
+  }, [loadCurrentUser]);
+
   const updateProfile = useCallback(async (profileData) => {
     const updatedUser = await authService.updateProfile(profileData);
     setUser(updatedUser);
     return updatedUser;
   }, []);
+
 
   const value = {
     user,

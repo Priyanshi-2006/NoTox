@@ -8,7 +8,7 @@ export default function Landing() {
   return (
     <div className="flex flex-col items-center justify-center gap-6 py-16 text-center">
       <span className="rounded-full bg-brand-50 px-4 py-1 text-sm font-medium text-brand-700">
-        Stage 1 — Authentication & Identity
+        Intelligent Real-Time Moderation
       </span>
       <h1 className="max-w-2xl text-4xl font-bold text-slate-900 sm:text-5xl">
         A social platform that's{" "}
@@ -16,11 +16,11 @@ export default function Landing() {
         luck.
       </h1>
       <p className="max-w-xl text-slate-600">
-        NoTox is being built incrementally. This stage lays the foundation:
-        accounts, JWT authentication and role-aware profiles that every
-        later feature — feeds, chat, moderation, trust scoring — will build
-        on top of.
+        Next-generation contextual and visual moderation platform for online chat,
+        livestreaming, and community interactions. Experience a safer online space
+        with transparent trust ratings and role-based protection.
       </p>
+
       <div className="flex gap-4">
         {isAuthenticated ? (
           <Link

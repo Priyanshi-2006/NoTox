@@ -6,8 +6,9 @@ export default function MainLayout({ children }) {
       <Navbar />
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">{children}</main>
       <footer className="border-t border-slate-200 py-6 text-center text-xs text-slate-400">
-        NoTox — Stage 1: Authentication & Identity
+        © {new Date().getFullYear()} NoTox — Real-Time Contextual & Visual Moderation
       </footer>
+
     </div>
   );
 }

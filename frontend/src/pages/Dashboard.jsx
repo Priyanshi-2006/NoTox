@@ -13,8 +13,7 @@ export default function Dashboard() {
           Welcome to NoTox{displayName ? `, ${displayName}` : ""}
         </h1>
         <p className="mt-1 text-slate-500">
-          Stage 2 — User Profiles & Trust Score Foundation. The feed, chat and
-          moderation engines arrive in later stages.
+          Your central overview for account standing, credibility score, and profile settings.
         </p>
       </div>
 
@@ -25,10 +24,9 @@ export default function Dashboard() {
       </div>
 
       <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
-        <p className="font-medium text-slate-700">Nothing here yet</p>
+        <p className="font-medium text-slate-700">Activity Hub</p>
         <p className="mt-1 text-sm">
-          The community feed, posts and real-time chat will show up here in
-          later stages.
+          Your community feed, live interaction stats, and moderation updates will appear here.
         </p>
         <Link
           to="/profile"
@@ -37,6 +35,7 @@ export default function Dashboard() {
           View & edit your profile →
         </Link>
       </div>
+
     </div>
   );
 }
