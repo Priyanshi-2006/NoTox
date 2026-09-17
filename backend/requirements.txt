@@ -1,0 +1,22 @@
+# Core framework
+Django==5.0.6
+djangorestframework==3.15.1
+
+# JWT auth
+djangorestframework-simplejwt==5.3.1
+
+# PostgreSQL driver
+psycopg2-binary==2.9.9
+
+# CORS handling for the React frontend
+django-cors-headers==4.3.1
+
+# Environment variable loading
+python-decouple==3.8
+
+# Redis client (used for cache/session backends; Channels arrives in a later stage)
+redis==5.0.4
+
+# ASGI server (Channels/websockets land in a later stage; installed now so the
+# ASGI application entrypoint created in this stage is runnable)
+daphne==4.1.2
