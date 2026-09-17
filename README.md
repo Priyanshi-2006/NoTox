@@ -1,240 +1,117 @@
-# NoTox — Stage 1: Authentication & Identity
+# NoTox
 
-NoTox is a real-time social interaction moderation platform, being built in
-incremental stages. **This repository currently contains Stage 1 only**:
-project scaffolding, a custom user model, and JWT-based authentication.
-Everything else (feed, chat, moderation, trust engine, streaming, etc.) is
-intentionally not implemented yet — see "What's not in Stage 1" below.
+**NoTox** is a real-time contextual and visual moderation platform designed for online chat, social communities, and livestreaming. The platform is being built incrementally across 14 developmental stages.
 
 ---
 
-## 1. Architecture overview
+## Tech Stack
+
+- **Backend:** Python 3.11+, Django 5, Django REST Framework, `djangorestframework-simplejwt`, PostgreSQL
+- **Frontend:** React 18, Vite, Tailwind CSS, Axios, React Router
+- **Architecture:** Modular Django app architecture with decoupled REST APIs and a responsive SPA frontend
+
+---
+
+## Project Structure
 
 ```
 notox/
-  backend/                  Django REST API
-    config/                 Project settings, root URLs, ASGI/WSGI
-    apps/
-      accounts/              Custom user model + JWT auth (the only app so far)
-    manage.py
-    requirements.txt
-    .env.example
-  frontend/                 React (Vite) SPA
-    src/
-      components/            Reusable UI (Navbar, ProtectedRoute, LoadingSpinner)
-      pages/                 Landing, Login, Register, Profile, Dashboard
-      layouts/               MainLayout (navbar + page shell)
-      services/              api.js (Axios client), authService.js
-      context/               AuthContext (global auth state)
-      hooks/                 useAuth()
-      utils/                 Client-side form validators
-    package.json
-    .env.example
+├── backend/
+│   ├── config/              # Root settings, routing, WSGI/ASGI configurations
+│   ├── apps/
+│   │   └── accounts/        # User accounts, authentication, profiles & trust score service
+│   ├── manage.py
+│   ├── requirements.txt
+│   └── .env.example
+└── frontend/
+    ├── src/
+    │   ├── components/      # Reusable UI components (Navbar, ProtectedRoute, LoadingSpinner)
+    │   ├── context/         # AuthContext (global authentication & profile state)
+    │   ├── hooks/           # useAuth hook
+    │   ├── layouts/         # MainLayout shell
+    │   ├── pages/           # Landing, Login, Register, Profile, Dashboard
+    │   ├── services/        # api.js (Axios client & interceptors), authService.js
+    │   └── utils/           # Client-side form validators
+    ├── package.json
+    └── .env.example
 ```
-
-**Backend:** Django 5 + Django REST Framework + `djangorestframework-simplejwt`,
-PostgreSQL, ASGI-ready (Channels/websockets are wired into `config/asgi.py`
-in a later stage, not this one).
-
-**Frontend:** React 18 + Vite + Tailwind CSS + Axios + React Router.
-
-The backend is modular by design: every future feature (posts, comments,
-moderation, chat, streaming, trust, reports, dashboard) gets its own app
-under `backend/apps/`, following the same shape as `accounts/`. Nothing in
-Stage 1 needs to be restructured for that to happen.
 
 ---
 
-## 2. Prerequisites
+## Stages Implemented
 
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL 14+ running locally (or accessible via network)
-- (Optional for this stage) Redis or Memurai — not required for auth to work
+### Stage 1 — Project Foundation & Authentication
+- **Custom User Model:** UUID-keyed `User` model inheriting from `AbstractBaseUser` and `PermissionsMixin`.
+- **JWT Authentication:** Secure registration, login (via username or email), token rotation, silent token refreshing, and refresh token blacklisting on logout.
+- **Frontend Auth Integration:** React authentication context, persistent tokens in storage with automatic Axios 401 interceptor retry, route protection, and form validation.
+- **Database & Error Handling:** PostgreSQL integration with unified DRF exception responses.
 
----
-
-## 3. Backend setup
-
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-cp .env.example .env
-# then edit .env: set SECRET_KEY, DB_NAME, DB_USER, DB_PASSWORD
-```
-
-### Create the PostgreSQL database
-
-```bash
-# adjust to your local Postgres setup
-createdb notox
-# or, from psql:
-#   CREATE DATABASE notox;
-#   CREATE USER notox_user WITH PASSWORD 'change-me';
-#   GRANT ALL PRIVILEGES ON DATABASE notox TO notox_user;
-```
-
-### Migrate and run
-
-```bash
-python manage.py makemigrations accounts
-python manage.py migrate
-python manage.py createsuperuser   # optional, for /admin/
-python manage.py runserver
-```
-
-The API is now at `http://localhost:8000/api/`.
-
-### Run backend tests
-
-```bash
-python manage.py test apps.accounts
-```
-
-All 12 tests (registration, duplicates, login, `/me`, roles, defaults) are
-included and pass against a real database connection.
+### Stage 2 — User Profiles & Trust Score Foundation
+- **User Profiles:** Extended user schema with `display_name`, `bio`, `avatar` (URL), `phone_number`, `role`, and `trust_score`.
+- **Role System:** Defined role choices (`user`, `moderator`, `admin`) with reusable permission classes (`IsAdminRole`, `IsModeratorRole`).
+- **Trust Score Engine Foundation:**
+  - Initial score initialized to `100`.
+  - Strict bounded range between `0` and `100`.
+  - Centralized `TrustScoreService` (`clamp_score`, `set_trust_score`, `increase_trust_score`, `decrease_trust_score`, `reset_trust_score`).
+- **Profile API:** Authenticated `GET` and `PATCH` endpoints on `/api/profile/` and `/api/auth/me/`. Users can update safe fields (`display_name`, `bio`, `avatar`), while system fields (`trust_score`, `role`, `strikes`, `restrictions`) are strictly immutable via the API.
+- **Profile UI:** Interactive profile dashboard featuring avatar display, role badges, trust score meter (`████████████████████ 100/100`), status tier badges, and inline profile editing with live preview.
+- **Automated Tests:** 24 unit and API tests validating authentication, profile retrieval/update, authorization boundaries, trust score clamping/mutations, and cross-user isolation.
 
 ---
 
-## 4. Frontend setup
+## API Endpoints
 
-```bash
-cd frontend
-npm install
-cp .env.example .env    # VITE_API_BASE_URL defaults to http://localhost:8000/api
-npm run dev
-```
-
-The app is now at `http://localhost:5173/`.
-
----
-
-## 5. Environment variables
-
-### Backend (`backend/.env`)
-
-| Variable | Purpose |
-|---|---|
-| `SECRET_KEY` | Django secret key — generate a long random string |
-| `DEBUG` | `True` locally, `False` in production |
-| `ALLOWED_HOSTS` | Comma-separated hostnames |
-| `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | PostgreSQL connection |
-| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Reserved for later stages (Channels, caching, Bloom filter). Auth works without Redis running. |
-| `JWT_ACCESS_TOKEN_LIFETIME_MINUTES`, `JWT_REFRESH_TOKEN_LIFETIME_DAYS` | Token lifetimes |
-| `CORS_ALLOWED_ORIGINS` | Frontend origin(s) allowed to call the API |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` | Placeholder only — leave blank. Phone OTP is not implemented yet (see `apps/accounts/services.py`); the app runs fine without these. |
-
-### Frontend (`frontend/.env`)
-
-| Variable | Purpose |
-|---|---|
-| `VITE_API_BASE_URL` | Base URL of the backend API, e.g. `http://localhost:8000/api` |
-
----
-
-## 6. API endpoints
-
-| Method | Endpoint | Auth required | Description |
+| Method | Endpoint | Auth Required | Description |
 |---|---|---|---|
-| POST | `/api/auth/register/` | No | Create an account, returns user + JWT pair |
-| POST | `/api/auth/login/` | No | Login with username or email + password |
-| POST | `/api/auth/logout/` | Yes | Blacklists the given refresh token |
-| POST | `/api/auth/token/refresh/` | No (needs refresh token) | Exchange a refresh token for a new access token |
-| GET | `/api/auth/me/` | Yes | Return the authenticated user's profile |
+| POST | `/api/auth/register/` | No | Create an account, returns user data + JWT tokens |
+| POST | `/api/auth/login/` | No | Authenticate with username/email and password |
+| POST | `/api/auth/logout/` | Yes | Blacklist refresh token and log out |
+| POST | `/api/auth/token/refresh/` | No | Obtain new access token via refresh token |
+| GET | `/api/auth/me/` | Yes | Retrieve authenticated user's profile |
 | PATCH | `/api/auth/me/` | Yes | Update safe profile fields (`display_name`, `bio`, `avatar`) |
-| GET | `/api/profile/` | Yes | Return the authenticated user's profile |
+| GET | `/api/profile/` | Yes | Retrieve authenticated user's profile |
 | PATCH | `/api/profile/` | Yes | Update safe profile fields (`display_name`, `bio`, `avatar`) |
 
 ---
 
-## Stage 2 — User Profiles & Trust Score
+## Getting Started
 
-Stage 2 introduces full user profiles, role choices, the trust score foundation, and profile editing.
+### 1. Backend Setup
 
-### Features Implemented:
-- **User Profiles:** Extended user model supporting `username`, `email`, `display_name`, `bio`, `avatar` (URL), `phone_number`, `role`, and `trust_score`.
-- **Roles:** Clear role choices (`USER = "user"`, `MODERATOR = "moderator"`, `ADMIN = "admin"`). Regular users default to `user` role. Permission classes `IsAdminRole` and `IsModeratorRole` are available.
-- **Initial Trust Score:** All new users start with an initial trust score of `100`.
-- **Trust Score Range:** Strict valid range bounded between `0` and `100`.
-- **Trust Score Service:** Centralized `TrustScoreService` in `apps/accounts/services.py` containing reusable functions (`clamp_score`, `set_trust_score`, `increase_trust_score`, `decrease_trust_score`, `reset_trust_score`) preventing values from exceeding 100 or dropping below 0.
-- **Profile API:** Authenticated `GET` and `PATCH` endpoints on `/api/profile/` and `/api/auth/me/`. Users can update safe fields (`display_name`, `bio`, `avatar`), while system fields (`trust_score`, `role`, `strike_count`, `is_restricted`, `username`, `email`) are strictly protected from modification.
-- **Profile UI & Editing:** Interactive profile dashboard in React showing avatar, username, display name, bio, role badge, account statistics, and a trust score bar with visual meter (`████████████████████ 100/100`), plus inline profile editing with live preview and feedback.
-- **Tests:** 24 unit and API tests in `apps/accounts/tests.py` verifying registration defaults, authentication, profile retrieval, profile updates, trust score immutability via API, role immutability via API, trust score service clamping/increments/decrements, cross-user isolation, and permissions.
+```bash
+cd backend
+python -m venv .venv
+# Activate virtual environment:
+# Windows: .\.venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
 
+pip install -r requirements.txt
+cp .env.example .env
 
----
+# Configure PostgreSQL connection in .env, then migrate:
+python manage.py migrate
+python manage.py runserver
+```
 
-## 7. Manual testing checklist
+### 2. Frontend Setup
 
-1. Start Postgres, then the backend (`python manage.py runserver`).
-2. Start the frontend (`npm run dev`), visit `http://localhost:5173/`.
-3. Landing page loads with **Sign up** / **Login** options.
-4. Register a new account → redirected to `/dashboard`, shows your username, role, trust score, strikes.
-5. Visit `/profile` → shows email, phone, trust score, strikes, restriction status, join date.
-6. Log out → redirected to `/login`.
-7. Try visiting `/dashboard` or `/profile` directly while logged out → redirected to `/login`.
-8. Log back in with the same username/email + password.
-9. Refresh the page while logged in → session persists (access token still valid, or silently refreshed).
-10. Try registering the same username or email again → clear inline error, no crash.
-11. Try logging in with a wrong password → clear inline error.
-12. Stop the backend and try to log in → frontend shows "Can't reach the server," not a raw error/stack trace.
+```bash
+cd frontend
+npm install
+cp .env.example .env
+npm run dev
+```
+
+The frontend will run at `http://localhost:5173/` and communicate with the backend at `http://localhost:8000/api/`.
 
 ---
 
-## 8. Known limitations (Stage 1)
+## Running Tests
 
-- **Tokens are stored in `localStorage`**, not an httpOnly cookie. This is
-  the simplest option for Stage 1 and is fine for local development, but it
-  is more exposed to XSS than a cookie-based flow. Moving to httpOnly
-  cookies is a reasonable hardening step for a later stage — it requires
-  backend CSRF handling changes, so it wasn't bundled into Stage 1 to avoid
-  scope creep on the auth flow itself.
-- **Phone OTP is not implemented.** `is_phone_verified` exists on the model
-  and a clean `OTPService` abstraction exists in
-  `apps/accounts/services.py`, but no real Twilio calls are made. Registering
-  without a phone number, or with an unverified one, is fully supported.
-- **No rate limiting** on login/register endpoints yet. Add this before any
-  public deployment.
-- **No password reset flow.** Not requested for Stage 1.
-- Redis/Memurai settings are wired up but unused — nothing currently
-  depends on Redis being available.
+Run the full backend test suite:
 
----
+```bash
+cd backend
+python manage.py test apps.accounts
+```
 
-## 9. What must NOT change in later stages
-
-These were deliberately built to be extension points — later stages should
-build *on* them, not replace them:
-
-- `apps/accounts/models.py` — the `User` model's existing fields and
-  defaults (`trust_score=100`, `strike_count=0`, `role=regular`, etc.).
-  Add fields/methods; don't rename or remove existing ones.
-- `apps/accounts/permissions.py` — `IsAdminRole` and `IsNotRestricted` are
-  meant to be imported by future apps (posts, comments, chat), not
-  reimplemented.
-- `apps/accounts/services.py` — `get_otp_service()` is the only place that
-  should ever construct an OTP backend; don't call Twilio directly from
-  views/serializers in a later stage.
-- `frontend/src/services/api.js` — the single Axios instance with its
-  token-refresh interceptor. Every future service module should import
-  `apiClient` from here rather than creating its own Axios instance.
-- `frontend/src/context/AuthContext.jsx` — the shape of `user`,
-  `isAuthenticated`, and `loading`, and the `login/register/logout/
-  refreshToken/getCurrentUser` function names.
-- The Django app-per-domain structure under `backend/apps/` — keep new
-  features (posts, comments, moderation, chat, etc.) in their own apps
-  rather than adding them into `accounts/`.
-
----
-
-## 10. What's not in Stage 1
-
-By design, none of the following exist yet: AI moderation, OpenAI/Perspective/
-Toxic-BERT integration, Bloom filter pre-filtering, real-time chat/WebSockets,
-posts, comments, live audio/video, Whisper, computer vision, strikes/
-restrictions enforcement, trust score calculation, reports, or the admin/
-moderator dashboard. These are future stages — say **"START STAGE 2"** when
-ready to begin the next one.
