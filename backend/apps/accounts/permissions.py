@@ -19,6 +19,22 @@ class IsAdminRole(BasePermission):
         )
 
 
+class IsModeratorRole(BasePermission):
+    """
+    Checks if the user has moderator or admin privileges.
+    """
+
+    message = "This action requires a moderator or admin role."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_moderator
+        )
+
+
+
 class IsNotRestricted(BasePermission):
     """
     Extension point for the strikes/restrictions stage. Stage 1 does not

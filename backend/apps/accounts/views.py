@@ -6,7 +6,12 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import LoginSerializer, RegisterSerializer, UserSerializer
+from .serializers import (
+    LoginSerializer,
+    ProfileUpdateSerializer,
+    RegisterSerializer,
+    UserSerializer,
+)
 
 
 def _tokens_for_user(user):
@@ -83,11 +88,42 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_205_RESET_CONTENT)
 
 
-class MeView(generics.RetrieveAPIView):
-    """GET /api/auth/me/"""
+class ProfileView(generics.RetrieveUpdateAPIView):
+    """
+    GET /api/profile/ or GET /api/auth/profile/
+    PATCH /api/profile/ or PATCH /api/auth/profile/
+
+    Retrieves or updates the authenticated user's profile.
+    Only safe profile fields (display_name, bio, avatar) can be updated.
+    System fields (role, trust_score, strikes, restrictions, id, username, email)
+    are strictly read-only.
+    """
 
     permission_classes = [IsAuthenticated]
-    serializer_class = UserSerializer
 
     def get_object(self):
         return self.request.user
+
+    def get_serializer_class(self):
+        if self.request.method in ("PATCH", "PUT"):
+            return ProfileUpdateSerializer
+        return UserSerializer
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", True)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(UserSerializer(instance).data)
+
+
+class MeView(ProfileView):
+    """
+    GET /api/auth/me/
+    PATCH /api/auth/me/
+
+    Alias/compatible endpoint for the authenticated user's profile.
+    """
+    pass
+

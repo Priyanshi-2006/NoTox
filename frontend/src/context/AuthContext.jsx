@@ -56,9 +56,11 @@ export function AuthProvider({ children }) {
     setIsAuthenticated(false);
   }, []);
 
-  const refreshToken = useCallback(async () => {
-    await loadCurrentUser();
-  }, [loadCurrentUser]);
+  const updateProfile = useCallback(async (profileData) => {
+    const updatedUser = await authService.updateProfile(profileData);
+    setUser(updatedUser);
+    return updatedUser;
+  }, []);
 
   const value = {
     user,
@@ -68,8 +70,10 @@ export function AuthProvider({ children }) {
     register,
     logout,
     refreshToken,
+    updateProfile,
     getCurrentUser: loadCurrentUser,
   };
+
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

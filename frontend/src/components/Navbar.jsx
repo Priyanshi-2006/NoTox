@@ -27,18 +27,32 @@ export default function Navbar() {
               <Link to="/dashboard" className="hover:text-brand-600">
                 Dashboard
               </Link>
-              <Link to="/profile" className="hover:text-brand-600">
-                Profile
+              <Link to="/profile" className="flex items-center gap-2 hover:text-brand-600">
+                <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-xs font-bold text-white">
+                  {user?.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt={user.display_name || user.username}
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        e.target.style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    user?.username?.[0]?.toUpperCase()
+                  )}
+                </span>
+                <span className="hidden sm:inline">
+                  {user?.display_name || user?.username}
+                </span>
               </Link>
-              <span className="hidden text-slate-400 sm:inline">
-                {user?.username}
-              </span>
               <button
                 onClick={handleLogout}
                 className="rounded-lg bg-slate-900 px-4 py-2 text-white transition hover:bg-slate-700"
               >
                 Logout
               </button>
+
             </>
           ) : (
             <>

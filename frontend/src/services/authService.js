@@ -40,7 +40,18 @@ export const authService = {
     return response.data;
   },
 
+  async getProfile() {
+    const response = await apiClient.get("/auth/profile/");
+    return response.data;
+  },
+
+  async updateProfile(profileData) {
+    const response = await apiClient.patch("/auth/profile/", profileData);
+    return response.data;
+  },
+
   isAuthenticated() {
     return Boolean(tokenStorage.getAccess());
   },
 };
+

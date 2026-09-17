@@ -135,7 +135,7 @@ The app is now at `http://localhost:5173/`.
 
 ---
 
-## 6. API endpoints (Stage 1)
+## 6. API endpoints
 
 | Method | Endpoint | Auth required | Description |
 |---|---|---|---|
@@ -144,6 +144,26 @@ The app is now at `http://localhost:5173/`.
 | POST | `/api/auth/logout/` | Yes | Blacklists the given refresh token |
 | POST | `/api/auth/token/refresh/` | No (needs refresh token) | Exchange a refresh token for a new access token |
 | GET | `/api/auth/me/` | Yes | Return the authenticated user's profile |
+| PATCH | `/api/auth/me/` | Yes | Update safe profile fields (`display_name`, `bio`, `avatar`) |
+| GET | `/api/profile/` | Yes | Return the authenticated user's profile |
+| PATCH | `/api/profile/` | Yes | Update safe profile fields (`display_name`, `bio`, `avatar`) |
+
+---
+
+## Stage 2 — User Profiles & Trust Score
+
+Stage 2 introduces full user profiles, role choices, the trust score foundation, and profile editing.
+
+### Features Implemented:
+- **User Profiles:** Extended user model supporting `username`, `email`, `display_name`, `bio`, `avatar` (URL), `phone_number`, `role`, and `trust_score`.
+- **Roles:** Clear role choices (`USER = "user"`, `MODERATOR = "moderator"`, `ADMIN = "admin"`). Regular users default to `user` role. Permission classes `IsAdminRole` and `IsModeratorRole` are available.
+- **Initial Trust Score:** All new users start with an initial trust score of `100`.
+- **Trust Score Range:** Strict valid range bounded between `0` and `100`.
+- **Trust Score Service:** Centralized `TrustScoreService` in `apps/accounts/services.py` containing reusable functions (`clamp_score`, `set_trust_score`, `increase_trust_score`, `decrease_trust_score`, `reset_trust_score`) preventing values from exceeding 100 or dropping below 0.
+- **Profile API:** Authenticated `GET` and `PATCH` endpoints on `/api/profile/` and `/api/auth/me/`. Users can update safe fields (`display_name`, `bio`, `avatar`), while system fields (`trust_score`, `role`, `strike_count`, `is_restricted`, `username`, `email`) are strictly protected from modification.
+- **Profile UI & Editing:** Interactive profile dashboard in React showing avatar, username, display name, bio, role badge, account statistics, and a trust score bar with visual meter (`████████████████████ 100/100`), plus inline profile editing with live preview and feedback.
+- **Tests:** 24 unit and API tests in `apps/accounts/tests.py` verifying registration defaults, authentication, profile retrieval, profile updates, trust score immutability via API, role immutability via API, trust score service clamping/increments/decrements, cross-user isolation, and permissions.
+
 
 ---
 

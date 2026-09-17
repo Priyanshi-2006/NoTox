@@ -12,7 +12,7 @@ phone_validator = RegexValidator(
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Read-only representation of a user, used by /me/ and nested elsewhere."""
+    """Read-only representation of a user, used by /me/, /profile/, and nested elsewhere."""
 
     class Meta:
         model = User
@@ -20,6 +20,9 @@ class UserSerializer(serializers.ModelSerializer):
             "id",
             "username",
             "email",
+            "display_name",
+            "bio",
+            "avatar",
             "phone_number",
             "role",
             "is_phone_verified",
@@ -28,8 +31,26 @@ class UserSerializer(serializers.ModelSerializer):
             "is_restricted",
             "restricted_until",
             "created_at",
+            "updated_at",
         ]
         read_only_fields = fields
+
+
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating safe profile fields.
+    Users cannot modify trust_score, role, strikes, restrictions, username, or email.
+    """
+
+    class Meta:
+        model = User
+        fields = ["display_name", "bio", "avatar"]
+
+    def validate_avatar(self, value):
+        if value and not (value.startswith("http://") or value.startswith("https://") or value.startswith("/")):
+            raise serializers.ValidationError("Avatar must be a valid URL.")
+        return value
+
 
 
 class RegisterSerializer(serializers.ModelSerializer):

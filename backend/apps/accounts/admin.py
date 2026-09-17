@@ -9,6 +9,7 @@ class UserAdmin(DjangoUserAdmin):
     ordering = ["-created_at"]
     list_display = [
         "username",
+        "display_name",
         "email",
         "role",
         "is_phone_verified",
@@ -19,12 +20,16 @@ class UserAdmin(DjangoUserAdmin):
         "created_at",
     ]
     list_filter = ["role", "is_phone_verified", "is_restricted", "is_active"]
-    search_fields = ["username", "email", "phone_number"]
+    search_fields = ["username", "display_name", "email", "phone_number"]
     readonly_fields = ["id", "created_at", "updated_at"]
 
     fieldsets = (
         (None, {"fields": ("id", "username", "password")}),
-        ("Personal info", {"fields": ("email", "phone_number")}),
+        (
+            "Personal & Profile info",
+            {"fields": ("display_name", "bio", "avatar", "email", "phone_number")},
+        ),
+
         (
             "Moderation state",
             {

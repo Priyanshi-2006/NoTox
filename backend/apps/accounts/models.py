@@ -2,12 +2,15 @@ import uuid
 
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
 class UserRole(models.TextChoices):
-    REGULAR = "regular", "Regular"
+    USER = "user", "User"
+    MODERATOR = "moderator", "Moderator"
     ADMIN = "admin", "Admin"
+    REGULAR = "regular", "Regular"  # Kept for Stage 1 backward compatibility
 
 
 class UserManager(BaseUserManager):
@@ -35,7 +38,7 @@ class UserManager(BaseUserManager):
     def create_user(self, username, email, password=None, **extra_fields):
         extra_fields.setdefault("is_staff", False)
         extra_fields.setdefault("is_superuser", False)
-        extra_fields.setdefault("role", UserRole.REGULAR)
+        extra_fields.setdefault("role", UserRole.USER)
         return self._create_user(username, email, password, **extra_fields)
 
     def create_superuser(self, username, email, password=None, **extra_fields):
@@ -53,13 +56,7 @@ class UserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     """
-    Stage 1 user model.
-
-    Only the fields Stage 1 needs to exist are populated with real
-    behaviour (trust_score, strike_count, is_restricted, restricted_until
-    are storage-only placeholders — the engines that compute/enforce
-    them are built in later stages and must not require a model change
-    to plug in).
+    Stage 2 user model with profile attributes and trust score foundation.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -68,16 +65,22 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     phone_number = models.CharField(max_length=20, blank=True, default="")
 
+    # Profile fields (Stage 2)
+    display_name = models.CharField(max_length=150, blank=True, default="")
+    bio = models.TextField(blank=True, default="")
+    avatar = models.URLField(max_length=500, blank=True, default="")
+
     role = models.CharField(
-        max_length=10, choices=UserRole.choices, default=UserRole.REGULAR
+        max_length=20, choices=UserRole.choices, default=UserRole.USER
     )
 
     is_phone_verified = models.BooleanField(default=False)
 
-    # Placeholders for later-stage trust/moderation engines. Stage 1 only
-    # establishes the fields and their defaults; nothing here computes
-    # or mutates them yet.
-    trust_score = models.IntegerField(default=100)
+    # Trust score foundation (Stage 2): Valid range is 0–100, default is 100.
+    trust_score = models.IntegerField(
+        default=100,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
     strike_count = models.PositiveIntegerField(default=0)
     is_restricted = models.BooleanField(default=False)
     restricted_until = models.DateTimeField(null=True, blank=True)
@@ -103,3 +106,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def is_admin(self):
         return self.role == UserRole.ADMIN
+
+    @property
+    def is_moderator(self):
+        return self.role in (UserRole.MODERATOR, UserRole.ADMIN)
+
+    @property
+    def display_title(self):
+        return self.display_name if self.display_name else self.username

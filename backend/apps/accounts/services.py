@@ -64,3 +64,64 @@ def get_otp_service() -> BaseOTPService:
             "not been implemented yet — that lands in a later stage."
         )
     return UnconfiguredOTPService()
+
+
+# ==================================================
+# Trust Score Service (Stage 2)
+# ==================================================
+
+MIN_TRUST_SCORE = 0
+MAX_TRUST_SCORE = 100
+INITIAL_TRUST_SCORE = 100
+
+
+class TrustScoreService:
+    """
+    Centralized service for managing and mutating user trust scores.
+    Guarantees that all updates respect the valid range (0-100).
+    """
+
+    MIN_SCORE = MIN_TRUST_SCORE
+    MAX_SCORE = MAX_TRUST_SCORE
+    INITIAL_SCORE = INITIAL_TRUST_SCORE
+
+    @classmethod
+    def clamp_score(cls, score: int) -> int:
+        """Clamp score to valid boundaries [MIN_SCORE, MAX_SCORE]."""
+        return max(cls.MIN_SCORE, min(cls.MAX_SCORE, int(score)))
+
+    @classmethod
+    def set_trust_score(cls, user, score: int) -> int:
+        """Set a user's trust score to a specific valid value."""
+        clamped = cls.clamp_score(score)
+        user.trust_score = clamped
+        user.save(update_fields=["trust_score", "updated_at"])
+        return user.trust_score
+
+    @classmethod
+    def increase_trust_score(cls, user, amount: int) -> int:
+        """Increase a user's trust score by an amount, capping at MAX_SCORE."""
+        if amount < 0:
+            raise ValueError("Amount to increase must be non-negative.")
+        return cls.set_trust_score(user, user.trust_score + amount)
+
+    @classmethod
+    def decrease_trust_score(cls, user, amount: int) -> int:
+        """Decrease a user's trust score by an amount, floored at MIN_SCORE."""
+        if amount < 0:
+            raise ValueError("Amount to decrease must be non-negative.")
+        return cls.set_trust_score(user, user.trust_score - amount)
+
+    @classmethod
+    def reset_trust_score(cls, user) -> int:
+        """Reset a user's trust score to the default initial value (100)."""
+        return cls.set_trust_score(user, cls.INITIAL_SCORE)
+
+
+# Convenience module-level functions
+clamp_trust_score = TrustScoreService.clamp_score
+set_trust_score = TrustScoreService.set_trust_score
+increase_trust_score = TrustScoreService.increase_trust_score
+decrease_trust_score = TrustScoreService.decrease_trust_score
+reset_trust_score = TrustScoreService.reset_trust_score
+

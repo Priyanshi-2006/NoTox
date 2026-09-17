@@ -4,22 +4,23 @@ import { useAuth } from "../hooks/useAuth";
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const displayName = user?.display_name || user?.username;
 
   return (
     <div className="flex flex-col gap-8">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">
-          Welcome to NoTox{user ? `, ${user.username}` : ""}
+          Welcome to NoTox{displayName ? `, ${displayName}` : ""}
         </h1>
         <p className="mt-1 text-slate-500">
-          This is Stage 1 — authentication only. The feed, chat and
-          moderation tools arrive in later stages.
+          Stage 2 — User Profiles & Trust Score Foundation. The feed, chat and
+          moderation engines arrive in later stages.
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Role" value={user?.role} />
-        <StatCard label="Trust score" value={user?.trust_score} />
+        <StatCard label="Trust score" value={user ? `${user.trust_score}/100` : "—"} />
         <StatCard label="Strikes" value={user?.strike_count} />
       </div>
 
@@ -33,7 +34,7 @@ export default function Dashboard() {
           to="/profile"
           className="mt-4 inline-block text-sm font-medium text-brand-600 hover:underline"
         >
-          View your profile →
+          View & edit your profile →
         </Link>
       </div>
     </div>
@@ -50,3 +51,4 @@ function StatCard({ label, value }) {
     </div>
   );
 }
+
