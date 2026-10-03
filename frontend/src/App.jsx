@@ -5,6 +5,7 @@ import MainLayout from "./layouts/MainLayout.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Landing from "./pages/Landing.jsx";
 import Login from "./pages/Login.jsx";
+import GlobalChat from "./pages/GlobalChat.jsx";
 import Profile from "./pages/Profile.jsx";
 import Register from "./pages/Register.jsx";
 
@@ -20,6 +21,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/chat"
+          element={
+            <ProtectedRoute>
+              <GlobalChat />
             </ProtectedRoute>
           }
         />
