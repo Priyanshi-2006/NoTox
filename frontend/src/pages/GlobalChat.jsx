@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import { tokenStorage } from "../services/api";
 
@@ -10,6 +9,7 @@ export default function GlobalChat() {
     const [message, setMessage] = useState("");
     const [status, setStatus] = useState("Connecting...");
     const [username, setUsername] = useState("");
+    const [myUsername, setMyUsername] = useState("");
     const [authenticated, setAuthenticated] = useState(false);
 
     const socketRef = useRef(null);
@@ -38,26 +38,32 @@ export default function GlobalChat() {
             try {
                 const data = JSON.parse(event.data);
 
-                if (data.type === "auth_required") {
-                    return;
-                }
+                if (data.type === "auth_required") return;
 
                 if (data.type === "authenticated") {
                     setUsername(data.display_name || data.username);
+                    setMyUsername(data.username);
                     setAuthenticated(true);
                     setStatus("Connected");
                     return;
                 }
 
-                if (data.type === "message" && typeof data.message === "string") {
+                if (
+                    data.type === "message" &&
+                    typeof data.message === "string"
+                ) {
                     setMessages((previous) => [
                         ...previous,
                         {
                             id: `${Date.now()}-${Math.random()}`,
                             text: data.message,
                             username: data.username || "User",
-                            displayName: data.display_name || data.username || "User",
-                            time: new Date().toLocaleTimeString(),
+                            displayName:
+                                data.display_name || data.username || "User",
+                            time: new Date().toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                            }),
                         },
                     ]);
                 }
@@ -127,9 +133,7 @@ export default function GlobalChat() {
                     </p>
                 </div>
 
-                <span className="text-sm text-slate-500">
-                    {status}
-                </span>
+                <span className="text-sm text-slate-500">{status}</span>
             </header>
 
             <div
@@ -141,22 +145,46 @@ export default function GlobalChat() {
                         No messages yet. Start the conversation!
                     </p>
                 ) : (
-                    messages.map((item) => (
-                        <article
-                            key={item.id}
-                            className="max-w-[85%] rounded-xl border border-slate-200 bg-white p-3"
-                        >
-                            <p className="mb-1 text-xs font-semibold text-indigo-700">
-                                {item.displayName}
-                            </p>
-                            <p className="break-words text-slate-800">
-                                {item.text}
-                            </p>
-                            <time className="mt-1 block text-xs text-slate-400">
-                                {item.time}
-                            </time>
-                        </article>
-                    ))
+                    messages.map((item) => {
+                        const isMine = item.username === myUsername;
+
+                        return (
+                            <div
+                                key={item.id}
+                                className={`flex w-full ${isMine ? "justify-end" : "justify-start"
+                                    }`}
+                            >
+                                <article
+                                    className={`max-w-[85%] rounded-2xl p-3 shadow-sm ${isMine
+                                        ? "rounded-br-sm bg-indigo-600 text-white"
+                                        : "rounded-bl-sm border border-slate-200 bg-white text-slate-800"
+                                        }`}
+                                >
+                                    <p
+                                        className={`mb-1 text-xs font-semibold ${isMine
+                                            ? "text-indigo-100"
+                                            : "text-indigo-700"
+                                            }`}
+                                    >
+                                        {isMine ? "You" : item.displayName}
+                                    </p>
+
+                                    <p className="break-words whitespace-pre-wrap">
+                                        {item.text}
+                                    </p>
+
+                                    <time
+                                        className={`mt-1 block text-right text-xs ${isMine
+                                            ? "text-indigo-200"
+                                            : "text-slate-400"
+                                            }`}
+                                    >
+                                        {item.time}
+                                    </time>
+                                </article>
+                            </div>
+                        );
+                    })
                 )}
 
                 <div ref={bottomRef} />
@@ -187,3 +215,4 @@ export default function GlobalChat() {
         </section>
     );
 }
+
