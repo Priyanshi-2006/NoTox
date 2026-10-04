@@ -1,28 +1,62 @@
 
 import { useEffect, useRef, useState } from "react";
+import { tokenStorage } from "../services/api";
+
+const WS_BASE_URL =
+    import.meta.env.VITE_WS_BASE_URL || "ws://127.0.0.1:8000";
 
 export default function GlobalChat() {
     const [messages, setMessages] = useState([]);
     const [message, setMessage] = useState("");
     const [status, setStatus] = useState("Connecting...");
+    const [username, setUsername] = useState("");
+    const [authenticated, setAuthenticated] = useState(false);
+
     const socketRef = useRef(null);
     const bottomRef = useRef(null);
 
     useEffect(() => {
-        const socket = new WebSocket("ws://127.0.0.1:8000/ws/chat/");
+        const token = tokenStorage.getAccess();
+
+        if (!token) {
+            setStatus("Please log in");
+            return;
+        }
+
+        const socket = new WebSocket(`${WS_BASE_URL}/ws/chat/`);
         socketRef.current = socket;
 
-        socket.onopen = () => setStatus("Connected");
+        socket.onopen = () => {
+            setStatus("Authenticating...");
+            socket.send(JSON.stringify({
+                type: "authenticate",
+                token,
+            }));
+        };
+
         socket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
 
-                if (typeof data.message === "string") {
+                if (data.type === "auth_required") {
+                    return;
+                }
+
+                if (data.type === "authenticated") {
+                    setUsername(data.display_name || data.username);
+                    setAuthenticated(true);
+                    setStatus("Connected");
+                    return;
+                }
+
+                if (data.type === "message" && typeof data.message === "string") {
                     setMessages((previous) => [
                         ...previous,
                         {
                             id: `${Date.now()}-${Math.random()}`,
                             text: data.message,
+                            username: data.username || "User",
+                            displayName: data.display_name || data.username || "User",
                             time: new Date().toLocaleTimeString(),
                         },
                     ]);
@@ -33,7 +67,18 @@ export default function GlobalChat() {
         };
 
         socket.onerror = () => setStatus("Connection error");
-        socket.onclose = () => setStatus("Disconnected");
+
+        socket.onclose = (event) => {
+            setAuthenticated(false);
+
+            if (event.code === 4401) {
+                setStatus("Authentication failed. Please log in again.");
+            } else if (event.code === 4403) {
+                setStatus("Chat access denied.");
+            } else {
+                setStatus("Disconnected");
+            }
+        };
 
         return () => {
             socket.close();
@@ -51,11 +96,20 @@ export default function GlobalChat() {
         const text = message.trim();
         const socket = socketRef.current;
 
-        if (!text || !socket || socket.readyState !== WebSocket.OPEN) {
+        if (
+            !text ||
+            !authenticated ||
+            !socket ||
+            socket.readyState !== WebSocket.OPEN
+        ) {
             return;
         }
 
-        socket.send(JSON.stringify({ message: text }));
+        socket.send(JSON.stringify({
+            type: "message",
+            message: text,
+        }));
+
         setMessage("");
     }
 
@@ -67,7 +121,9 @@ export default function GlobalChat() {
                         NoTox Global Chat
                     </h1>
                     <p className="mt-1 text-sm text-slate-500">
-                        Chat live with connected users
+                        {authenticated
+                            ? `Logged in as ${username}`
+                            : "Chat live with connected users"}
                     </p>
                 </div>
 
@@ -90,7 +146,12 @@ export default function GlobalChat() {
                             key={item.id}
                             className="max-w-[85%] rounded-xl border border-slate-200 bg-white p-3"
                         >
-                            <p className="break-words text-slate-800">{item.text}</p>
+                            <p className="mb-1 text-xs font-semibold text-indigo-700">
+                                {item.displayName}
+                            </p>
+                            <p className="break-words text-slate-800">
+                                {item.text}
+                            </p>
                             <time className="mt-1 block text-xs text-slate-400">
                                 {item.time}
                             </time>
@@ -111,12 +172,13 @@ export default function GlobalChat() {
                     placeholder="Type a message..."
                     maxLength={2000}
                     aria-label="Chat message"
-                    className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    disabled={!authenticated}
+                    className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
                 />
 
                 <button
                     type="submit"
-                    disabled={status !== "Connected" || !message.trim()}
+                    disabled={!authenticated || !message.trim()}
                     className="rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     Send
