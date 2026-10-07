@@ -36,7 +36,7 @@ class RegistrationTests(APITestCase):
 
     def test_default_role(self):
         response = self.client.post(self.url, self.payload)
-        self.assertIn(response.data["user"]["role"], [UserRole.USER, UserRole.REGULAR])
+        self.assertEqual(response.data["user"]["role"], UserRole.USER)
 
     def test_default_trust_score(self):
         response = self.client.post(self.url, self.payload)

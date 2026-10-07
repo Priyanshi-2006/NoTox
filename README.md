@@ -59,19 +59,15 @@ notox/
 - **Profile UI:** Interactive profile dashboard featuring avatar display, role badges, trust score meter (`████████████████████ 100/100`), status tier badges, and inline profile editing with live preview.
 - **Automated Tests:** 24 unit and API tests validating authentication, profile retrieval/update, authorization boundaries, trust score clamping/mutations, and cross-user isolation.
 
-### Stage 3 — Real-Time Global Chat
-Global Chat Backend: Added a dedicated chat Django application for real-time communication using Django Channels and Daphne.
-WebSocket Configuration: Configured ASGI-based WebSocket routing with the global chat endpoint:
-ws://localhost:8000/ws/chat/
-JWT WebSocket Authentication: WebSocket clients authenticate using the existing JWT access token. Only authenticated and active users can join the global chat.
-User Restrictions: Restricted users are prevented from connecting to the global chat.
-Real-Time Message Broadcasting: Implemented GlobalChatConsumer to receive and broadcast messages to all currently connected authenticated users.
-Message Validation: Added message length validation with a maximum message size of 2000 characters.
-Frontend Global Chat: Added a dedicated GlobalChat React page with WebSocket communication and connection/authentication status handling.
-Chat Message UI: Messages sent by the current user are displayed on the right, while messages received from other users are displayed on the left.
-Sender Information: Chat messages include the sender's username and display name.
-Current Limitation: Chat messages are currently real-time only and are not persisted in the database.
-Development Channel Layer: The current implementation uses Django Channels' InMemoryChannelLayer, which is suitable for local development and single-process use. Production-ready channel infrastructure will be implemented in a later stage.
+### Stage 3A — Chat foundation (early)
+- **ChatMessage Persistence:** UUID-keyed `ChatMessage` model with nullable `sender` FK, `content` (up to 2000 characters), and indexed `created_at` timestamp.
+- **WebSocket Protocol & Lifecycle:** ASGI-routed WebSocket on `ws://localhost:8000/ws/chat/` with two-step handshake (`auth_required` -> `authenticate`).
+- **Restriction-Aware Access:** Integrated `User.is_currently_restricted()` with lazy clearance of expired restrictions. Restricted users receive close code `4403` on connect and mid-session.
+- **Token Expiry Enforcement:** Evaluates access token `exp` timestamp on incoming messages, terminating expired sessions with close code `4401`.
+- **Pre-Broadcast Storage:** Messages are saved via `database_sync_to_async` before group broadcast, delivering consistent server `id` and ISO `created_at` timestamps to all clients.
+- **Message History API:** `GET /api/chat/messages/` protected by `IsAuthenticated` and `IsNotRestricted`, returning the latest 50 messages oldest-first with `before` cursor ISO pagination.
+- **Frontend Resilience:** Automatic WebSocket reconnection with capped exponential backoff, single silent token refresh retry on `4401`, clear restricted status banner, and historical message loading.
+- **Channel Layer:** Configured with `InMemoryChannelLayer` for local development and testing (note: `channels-redis` is required for multi-process or production use).
 
 ---
 
@@ -87,11 +83,12 @@ Development Channel Layer: The current implementation uses Django Channels' InMe
 | PATCH | `/api/auth/me/` | Yes | Update safe profile fields (`display_name`, `bio`, `avatar`) |
 | GET | `/api/profile/` | Yes | Retrieve authenticated user's profile |
 | PATCH | `/api/profile/` | Yes | Update safe profile fields (`display_name`, `bio`, `avatar`) |
+| GET | `/api/chat/messages/` | Yes (Unrestricted) | Retrieve latest 50 chat messages (oldest-first, optional `before` cursor) |
 
 ## WebSocket Endpoint
 | Protocol | Endpoint | Auth Required | Description |
 | ---|---|---|---|
-| WebSocket | ws://localhost:8000/ws/chat/ | JWT Access Token |Real-time global chat communication |
+| WebSocket | ws://localhost:8000/ws/chat/ | JWT Access Token | Real-time global chat communication |
 
 ---
 
@@ -109,7 +106,7 @@ python -m venv .venv
 pip install -r requirements.txt
 cp .env.example .env
 
-# Configure PostgreSQL connection in .env, then migrate:
+# Configure database in .env, then migrate:
 python manage.py migrate
 python manage.py runserver
 ```
@@ -133,6 +130,6 @@ Run the full backend test suite:
 
 ```bash
 cd backend
-python manage.py test apps.accounts
+python manage.py test
 ```
 

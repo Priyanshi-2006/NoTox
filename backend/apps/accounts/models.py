@@ -4,13 +4,13 @@ from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 
 class UserRole(models.TextChoices):
     USER = "user", "User"
     MODERATOR = "moderator", "Moderator"
     ADMIN = "admin", "Admin"
-    REGULAR = "regular", "Regular"  # Kept for Stage 1 backward compatibility
 
 
 class UserManager(BaseUserManager):
@@ -114,3 +114,22 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def display_title(self):
         return self.display_name if self.display_name else self.username
+
+    def is_currently_restricted(self):
+        """
+        Returns True only if is_restricted is True AND (restricted_until is null
+        OR restricted_until > now). If restricted_until has passed, treats the user
+        as unrestricted and clears is_restricted and restricted_until lazily.
+        """
+        if not self.is_restricted:
+            return False
+
+        if self.restricted_until is not None:
+            if self.restricted_until <= timezone.now():
+                self.is_restricted = False
+                self.restricted_until = None
+                self.save(update_fields=["is_restricted", "restricted_until", "updated_at"])
+                return False
+
+        return True
+

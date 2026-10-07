@@ -1,10 +1,5 @@
 """
-Django settings for the NoTox project — Stage 1.
-
-Only what Stage 1 needs is wired up here (auth, DRF, JWT, CORS,
-PostgreSQL). Redis is configured as connection variables only; it is not
-yet plugged into caching or Channels — that arrives with real-time chat
-in a later stage.
+Django settings for the NoTox project.
 """
 
 from datetime import timedelta
@@ -75,6 +70,9 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
+# WebSockets / Channels
+# InMemoryChannelLayer is used for single-process local development and testing.
+# For multi-process or production environments, channels-redis (channels_redis.core.RedisChannelLayer) is required.
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels.layers.InMemoryChannelLayer",
@@ -181,10 +179,8 @@ CORS_ALLOWED_ORIGINS = config(
 CORS_ALLOW_CREDENTIALS = True
 
 # ==================================================
-# Redis / Memurai — connection settings only.
-# Not yet used by caching or Channels; that is wired up when the chat
-# and Bloom-filter stages are built. Kept here so later stages don't
-# need to touch settings.py's structure, only add to it.
+# Redis / Memurai — connection settings.
+# Used for caching, rate limiting, and the Redis channel layer in production.
 # ==================================================
 REDIS_HOST = config("REDIS_HOST", default="localhost")
 REDIS_PORT = config("REDIS_PORT", default=6379, cast=int)

@@ -1,10 +1,6 @@
 """
 ASGI entrypoint for NoTox.
 
-Stage 1 exposes a plain Django ASGI application. When real-time chat is
-built, this file will grow a ProtocolTypeRouter that dispatches "http" to
-this same Django app and "websocket" to Channels consumers — nothing
-here needs to change shape to support that, only extend it.
 Routes HTTP requests to Django and WebSocket
 connections to Django Channels consumers.
 """

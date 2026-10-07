@@ -38,7 +38,7 @@ apiClient.interceptors.request.use((config) => {
 // keeps every page from having to know about token expiry.
 let refreshPromise = null;
 
-async function refreshAccessToken() {
+export async function refreshAccessToken() {
   const refresh = tokenStorage.getRefresh();
   if (!refresh) throw new Error("No refresh token available.");
 

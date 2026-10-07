@@ -49,5 +49,5 @@ class IsNotRestricted(BasePermission):
         return bool(
             request.user
             and request.user.is_authenticated
-            and not request.user.is_restricted
+            and not request.user.is_currently_restricted()
         )

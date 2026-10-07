@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { tokenStorage } from "../services/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { apiClient, refreshAccessToken, tokenStorage } from "../services/api";
 
-const WS_BASE_URL =
-    import.meta.env.VITE_WS_BASE_URL || "ws://127.0.0.1:8000";
+function getWebSocketBaseUrl() {
+    if (import.meta.env.VITE_WS_BASE_URL) {
+        return import.meta.env.VITE_WS_BASE_URL;
+    }
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.hostname || "127.0.0.1";
+    return `${protocol}//${host}:8000`;
+}
+
+const INITIAL_BACKOFF_MS = 1000;
+const MAX_BACKOFF_MS = 30000;
 
 export default function GlobalChat() {
     const [messages, setMessages] = useState([]);
@@ -11,30 +21,88 @@ export default function GlobalChat() {
     const [username, setUsername] = useState("");
     const [myUsername, setMyUsername] = useState("");
     const [authenticated, setAuthenticated] = useState(false);
+    const [isRestricted, setIsRestricted] = useState(false);
+    const [loadingHistory, setLoadingHistory] = useState(false);
 
     const socketRef = useRef(null);
     const bottomRef = useRef(null);
+    const reconnectAttemptRef = useRef(0);
+    const reconnectTimeoutRef = useRef(null);
+    const hasRefreshedAuthRef = useRef(false);
+    const isUnmountedRef = useRef(false);
 
-    useEffect(() => {
+    const navigate = useNavigate();
+
+    const formatMessage = (msg) => ({
+        id: msg.id,
+        text: msg.message || msg.content,
+        username: msg.username || "User",
+        displayName: msg.display_name || msg.username || "User",
+        time: msg.created_at
+            ? new Date(msg.created_at).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+              })
+            : "",
+        createdAt: msg.created_at,
+    });
+
+    const loadHistory = useCallback(async () => {
+        try {
+            setLoadingHistory(true);
+            const response = await apiClient.get("/chat/messages/");
+            const history = Array.isArray(response.data) ? response.data : [];
+            setMessages(history.map(formatMessage));
+        } catch (error) {
+            if (error.response?.status === 403) {
+                setIsRestricted(true);
+                setStatus("Chat access denied: Account restricted");
+            } else {
+                console.error("Failed to load chat history:", error);
+            }
+        } finally {
+            setLoadingHistory(false);
+        }
+    }, []);
+
+    const connectWebSocket = useCallback(() => {
+        if (isUnmountedRef.current) return;
+
         const token = tokenStorage.getAccess();
-
         if (!token) {
             setStatus("Please log in");
             return;
         }
 
-        const socket = new WebSocket(`${WS_BASE_URL}/ws/chat/`);
+        // Cleanly detach and close any existing socket
+        if (socketRef.current) {
+            const oldSocket = socketRef.current;
+            socketRef.current = null;
+            oldSocket.onopen = null;
+            oldSocket.onmessage = null;
+            oldSocket.onerror = null;
+            oldSocket.onclose = null;
+            oldSocket.close(1000, "Switching socket");
+        }
+
+        const wsBaseUrl = getWebSocketBaseUrl();
+        const socket = new WebSocket(`${wsBaseUrl}/ws/chat/`);
         socketRef.current = socket;
+        setStatus("Connecting...");
 
         socket.onopen = () => {
+            if (isUnmountedRef.current || socketRef.current !== socket) return;
             setStatus("Authenticating...");
-            socket.send(JSON.stringify({
-                type: "authenticate",
-                token,
-            }));
+            socket.send(
+                JSON.stringify({
+                    type: "authenticate",
+                    token,
+                })
+            );
         };
 
         socket.onmessage = (event) => {
+            if (isUnmountedRef.current || socketRef.current !== socket) return;
             try {
                 const data = JSON.parse(event.data);
 
@@ -44,53 +112,114 @@ export default function GlobalChat() {
                     setUsername(data.display_name || data.username);
                     setMyUsername(data.username);
                     setAuthenticated(true);
+                    setIsRestricted(false);
                     setStatus("Connected");
+                    reconnectAttemptRef.current = 0;
+                    hasRefreshedAuthRef.current = false;
+
+                    // Load persisted message history on successful authentication
+                    loadHistory();
                     return;
                 }
 
-                if (
-                    data.type === "message" &&
-                    typeof data.message === "string"
-                ) {
-                    setMessages((previous) => [
-                        ...previous,
-                        {
-                            id: `${Date.now()}-${Math.random()}`,
-                            text: data.message,
-                            username: data.username || "User",
-                            displayName:
-                                data.display_name || data.username || "User",
-                            time: new Date().toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                            }),
-                        },
-                    ]);
+                if (data.type === "message" && typeof data.message === "string") {
+                    setMessages((previous) => {
+                        // Prevent duplicate message IDs
+                        if (data.id && previous.some((m) => m.id === data.id)) {
+                            return previous;
+                        }
+                        return [...previous, formatMessage(data)];
+                    });
                 }
-            } catch {
-                console.error("Invalid chat message received");
+            } catch (err) {
+                console.error("Invalid chat message received:", err);
             }
         };
 
-        socket.onerror = () => setStatus("Connection error");
+        socket.onerror = (err) => {
+            if (isUnmountedRef.current || socketRef.current !== socket) return;
+            console.warn("WebSocket error:", err);
+            setStatus("Connection error");
+        };
 
-        socket.onclose = (event) => {
+        socket.onclose = async (event) => {
+            // Ignore events from old or unmounted sockets
+            if (isUnmountedRef.current || socketRef.current !== socket) return;
+            socketRef.current = null;
             setAuthenticated(false);
 
-            if (event.code === 4401) {
-                setStatus("Authentication failed. Please log in again.");
-            } else if (event.code === 4403) {
-                setStatus("Chat access denied.");
-            } else {
+            // Clean close, do not reconnect
+            if (event.code === 1000) {
                 setStatus("Disconnected");
+                return;
             }
+
+            if (event.code === 4401) {
+                if (!hasRefreshedAuthRef.current) {
+                    hasRefreshedAuthRef.current = true;
+                    setStatus("Session expired. Refreshing token...");
+                    try {
+                        await refreshAccessToken();
+                        connectWebSocket();
+                        return;
+                    } catch (err) {
+                        setStatus("Authentication failed. Please log in again.");
+                        tokenStorage.clear();
+                        navigate("/login");
+                        return;
+                    }
+                } else {
+                    setStatus("Authentication failed. Please log in again.");
+                    tokenStorage.clear();
+                    navigate("/login");
+                    return;
+                }
+            }
+
+            if (event.code === 4403) {
+                setIsRestricted(true);
+                setStatus("Chat access denied: Account restricted");
+                return;
+            }
+
+            // Standard unexpected connection drop - retry with capped exponential backoff
+            const delay = Math.min(
+                INITIAL_BACKOFF_MS * Math.pow(2, reconnectAttemptRef.current),
+                MAX_BACKOFF_MS
+            );
+            reconnectAttemptRef.current += 1;
+            setStatus(`Disconnected. Reconnecting in ${Math.round(delay / 1000)}s...`);
+
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+            }
+            reconnectTimeoutRef.current = setTimeout(() => {
+                connectWebSocket();
+            }, delay);
         };
+    }, [loadHistory, navigate]);
+
+    useEffect(() => {
+        isUnmountedRef.current = false;
+        connectWebSocket();
 
         return () => {
-            socket.close();
-            socketRef.current = null;
+            isUnmountedRef.current = true;
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+                reconnectTimeoutRef.current = null;
+            }
+            if (socketRef.current) {
+                const s = socketRef.current;
+                socketRef.current = null;
+                s.onopen = null;
+                s.onmessage = null;
+                s.onerror = null;
+                s.onclose = null;
+                s.close(1000, "Component unmounted");
+            }
         };
-    }, []);
+    }, [connectWebSocket]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -105,16 +234,19 @@ export default function GlobalChat() {
         if (
             !text ||
             !authenticated ||
+            isRestricted ||
             !socket ||
             socket.readyState !== WebSocket.OPEN
         ) {
             return;
         }
 
-        socket.send(JSON.stringify({
-            type: "message",
-            message: text,
-        }));
+        socket.send(
+            JSON.stringify({
+                type: "message",
+                message: text,
+            })
+        );
 
         setMessage("");
     }
@@ -129,18 +261,40 @@ export default function GlobalChat() {
                     <p className="mt-1 text-sm text-slate-500">
                         {authenticated
                             ? `Logged in as ${username}`
+                            : isRestricted
+                            ? "Account restricted"
                             : "Chat live with connected users"}
                     </p>
                 </div>
 
-                <span className="text-sm text-slate-500">{status}</span>
+                <div className="flex items-center gap-2">
+                    {isRestricted && (
+                        <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-800">
+                            Restricted
+                        </span>
+                    )}
+                    <span className="text-sm text-slate-500">{status}</span>
+                </div>
             </header>
+
+            {isRestricted && (
+                <div
+                    className="border-b border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-700"
+                    role="alert"
+                >
+                    <strong>Access Restricted:</strong> Your account is currently restricted from participating in chat.
+                </div>
+            )}
 
             <div
                 className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-5"
                 aria-live="polite"
             >
-                {messages.length === 0 ? (
+                {loadingHistory && messages.length === 0 ? (
+                    <p className="py-10 text-center text-sm text-slate-500">
+                        Loading message history...
+                    </p>
+                ) : messages.length === 0 ? (
                     <p className="py-10 text-center text-sm text-slate-500">
                         No messages yet. Start the conversation!
                     </p>
@@ -151,20 +305,23 @@ export default function GlobalChat() {
                         return (
                             <div
                                 key={item.id}
-                                className={`flex w-full ${isMine ? "justify-end" : "justify-start"
-                                    }`}
+                                className={`flex w-full ${
+                                    isMine ? "justify-end" : "justify-start"
+                                }`}
                             >
                                 <article
-                                    className={`max-w-[85%] rounded-2xl p-3 shadow-sm ${isMine
-                                        ? "rounded-br-sm bg-indigo-600 text-white"
-                                        : "rounded-bl-sm border border-slate-200 bg-white text-slate-800"
-                                        }`}
+                                    className={`max-w-[85%] rounded-2xl p-3 shadow-sm ${
+                                        isMine
+                                            ? "rounded-br-sm bg-indigo-600 text-white"
+                                            : "rounded-bl-sm border border-slate-200 bg-white text-slate-800"
+                                    }`}
                                 >
                                     <p
-                                        className={`mb-1 text-xs font-semibold ${isMine
-                                            ? "text-indigo-100"
-                                            : "text-indigo-700"
-                                            }`}
+                                        className={`mb-1 text-xs font-semibold ${
+                                            isMine
+                                                ? "text-indigo-100"
+                                                : "text-indigo-700"
+                                        }`}
                                     >
                                         {isMine ? "You" : item.displayName}
                                     </p>
@@ -174,10 +331,11 @@ export default function GlobalChat() {
                                     </p>
 
                                     <time
-                                        className={`mt-1 block text-right text-xs ${isMine
-                                            ? "text-indigo-200"
-                                            : "text-slate-400"
-                                            }`}
+                                        className={`mt-1 block text-right text-xs ${
+                                            isMine
+                                                ? "text-indigo-200"
+                                                : "text-slate-400"
+                                        }`}
                                     >
                                         {item.time}
                                     </time>
@@ -197,16 +355,20 @@ export default function GlobalChat() {
                 <input
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}
-                    placeholder="Type a message..."
+                    placeholder={
+                        isRestricted
+                            ? "Chat disabled for restricted accounts."
+                            : "Type a message..."
+                    }
                     maxLength={2000}
                     aria-label="Chat message"
-                    disabled={!authenticated}
+                    disabled={!authenticated || isRestricted}
                     className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
                 />
 
                 <button
                     type="submit"
-                    disabled={!authenticated || !message.trim()}
+                    disabled={!authenticated || !message.trim() || isRestricted}
                     className="rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     Send
@@ -215,4 +377,3 @@ export default function GlobalChat() {
         </section>
     );
 }
-
