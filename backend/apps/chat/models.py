@@ -13,7 +13,9 @@ class ChatMessage(models.Model):
         blank=True,
         related_name="chat_messages",
     )
-    content = models.TextField(max_length=2000)
+    content = models.TextField(max_length=2000) 
+    blocked = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

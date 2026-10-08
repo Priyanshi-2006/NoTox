@@ -40,19 +40,36 @@ export default function GlobalChat() {
         displayName: msg.display_name || msg.username || "User",
         time: msg.created_at
             ? new Date(msg.created_at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-              })
+                hour: "2-digit",
+                minute: "2-digit",
+            })
             : "",
         createdAt: msg.created_at,
+        blocked: msg.blocked || false,
     });
 
     const loadHistory = useCallback(async () => {
         try {
             setLoadingHistory(true);
+
             const response = await apiClient.get("/chat/messages/");
             const history = Array.isArray(response.data) ? response.data : [];
-            setMessages(history.map(formatMessage));
+
+            const historyMessages = history.map(formatMessage);
+
+            setMessages((previous) => {
+                const historyIds = new Set(
+                    historyMessages.map((msg) => msg.id)
+                );
+
+                // Keep messages that arrived through WebSocket
+                // while history was loading.
+                const liveMessages = previous.filter(
+                    (msg) => !historyIds.has(msg.id)
+                );
+
+                return [...historyMessages, ...liveMessages];
+            });
         } catch (error) {
             if (error.response?.status === 403) {
                 setIsRestricted(true);
@@ -122,6 +139,27 @@ export default function GlobalChat() {
                     return;
                 }
 
+                if (data.type === "moderation_block" && typeof data.message === "string") {
+                    setMessages((previous) => [
+                        ...previous,
+                        {
+                            id: data.id,
+                            text: data.message,
+                            username: data.username,
+                            displayName: data.display_name || data.username || "You",
+                            time: data.created_at
+                                ? new Date(data.created_at).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                })
+                                : "",
+                            createdAt: data.created_at,
+                            blocked: true,
+                        },
+                    ]);
+
+                    return;
+                }
                 if (data.type === "message" && typeof data.message === "string") {
                     setMessages((previous) => {
                         // Prevent duplicate message IDs
@@ -262,8 +300,8 @@ export default function GlobalChat() {
                         {authenticated
                             ? `Logged in as ${username}`
                             : isRestricted
-                            ? "Account restricted"
-                            : "Chat live with connected users"}
+                                ? "Account restricted"
+                                : "Chat live with connected users"}
                     </p>
                 </div>
 
@@ -300,42 +338,45 @@ export default function GlobalChat() {
                     </p>
                 ) : (
                     messages.map((item) => {
-                        const isMine = item.username === myUsername;
+                        const isMine = item.blocked || item.username === myUsername;
 
                         return (
                             <div
                                 key={item.id}
-                                className={`flex w-full ${
-                                    isMine ? "justify-end" : "justify-start"
-                                }`}
+                                className={`flex w-full ${isMine ? "justify-end" : "justify-start"
+                                    }`}
                             >
                                 <article
-                                    className={`max-w-[85%] rounded-2xl p-3 shadow-sm ${
-                                        isMine
-                                            ? "rounded-br-sm bg-indigo-600 text-white"
-                                            : "rounded-bl-sm border border-slate-200 bg-white text-slate-800"
-                                    }`}
+                                    className={`max-w-[85%] rounded-2xl p-3 shadow-sm ${isMine
+                                        ? "rounded-br-sm bg-indigo-600 text-white"
+                                        : "rounded-bl-sm border border-slate-200 bg-white text-slate-800"
+                                        }`}
                                 >
                                     <p
-                                        className={`mb-1 text-xs font-semibold ${
-                                            isMine
-                                                ? "text-indigo-100"
-                                                : "text-indigo-700"
-                                        }`}
+                                        className={`mb-1 text-xs font-semibold ${isMine
+                                            ? "text-indigo-100"
+                                            : "text-indigo-700"
+                                            }`}
                                     >
                                         {isMine ? "You" : item.displayName}
                                     </p>
+
+                                    {item.blocked && (
+                                        <div className="mb-1 flex items-center justify-end gap-1 text-xs text-indigo-200">
+                                            <span>🚫</span>
+                                            <span>Message blocked</span>
+                                        </div>
+                                    )}
 
                                     <p className="break-words whitespace-pre-wrap">
                                         {item.text}
                                     </p>
 
                                     <time
-                                        className={`mt-1 block text-right text-xs ${
-                                            isMine
-                                                ? "text-indigo-200"
-                                                : "text-slate-400"
-                                        }`}
+                                        className={`mt-1 block text-right text-xs ${isMine
+                                            ? "text-indigo-200"
+                                            : "text-slate-400"
+                                            }`}
                                     >
                                         {item.time}
                                     </time>

@@ -1,10 +1,28 @@
 from datetime import datetime
 from typing import List, Optional
 
+from better_profanity import profanity
+
 from apps.chat.models import ChatMessage
 
 
+# Load the default profanity word list
+profanity.load_censor_words()
+
+
 class ChatService:
+
+    @classmethod
+    def contains_profanity(cls, content: str) -> bool:
+        """
+        Check whether the message contains profanity.
+
+        Returns:
+            True  -> profanity detected
+            False -> no profanity detected
+        """
+        return profanity.contains_profanity(content)
+
     @classmethod
     def save_message(cls, sender, content: str) -> ChatMessage:
         return ChatMessage.objects.create(

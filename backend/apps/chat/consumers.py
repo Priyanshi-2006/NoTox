@@ -103,6 +103,17 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
         if not message or len(message) > 2000:
             return
 
+        # Check message for profanity before saving or broadcasting.
+        is_toxic = ChatService.contains_profanity(message)
+
+        if is_toxic:
+            await self.send(text_data=json.dumps({
+                "type": "moderation_block",
+                "message": message,
+                "blocked": True,
+            }))
+            return
+
         # Persist message to database before broadcasting.
         chat_msg = await self.persist_message(self.user, message)
 
