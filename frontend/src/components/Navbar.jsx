@@ -31,6 +31,10 @@ export default function Navbar() {
               <Link to="/chat" className="hover:text-brand-600">
                 Global Chat
               </Link>
+              
+              <Link to="/streams" className="hover:text-brand-600">
+                Live
+              </Link>
               <Link to="/profile" className="flex items-center gap-2 hover:text-brand-600">
                 <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-xs font-bold text-white">
                   {user?.avatar ? (
