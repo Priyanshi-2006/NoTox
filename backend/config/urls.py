@@ -7,5 +7,6 @@ urlpatterns = [
     path("api/auth/", include("apps.accounts.urls")),
     path("api/profile/", ProfileView.as_view(), name="profile"),
     path("api/chat/", include("apps.chat.urls")),
+    path("api/streams/", include("apps.streams.urls")),
 ]
 
