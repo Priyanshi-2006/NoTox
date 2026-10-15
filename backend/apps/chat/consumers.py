@@ -1,11 +1,17 @@
+import asyncio
 import json
+import logging
 import time
+import uuid
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 from apps.chat.authentication import check_user_restriction, get_user_from_token
+from apps.chat.moderation.pipeline import ModerationResult, get_moderation_pipeline
 from apps.chat.services import ChatService
+
+logger = logging.getLogger(__name__)
 
 
 class GlobalChatConsumer(AsyncWebsocketConsumer):
@@ -103,19 +109,24 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
         if not message or len(message) > 2000:
             return
 
-        # Check message for profanity before saving or broadcasting.
-        is_toxic = ChatService.contains_profanity(message)
+        # Run 3-stage moderation pipeline: Keyword -> Bloom -> Provider
+        pipeline = get_moderation_pipeline()
+        mod_result = await pipeline.evaluate(self.user, message)
 
-        if is_toxic:
+        if mod_result.is_blocked:
+            # Layer 1 instant block or Layer 3 block: same payload plus a generated id
+            await self.log_moderation_event(self.user, None, mod_result, message)
             await self.send(text_data=json.dumps({
                 "type": "moderation_block",
+                "id": str(uuid.uuid4()),
                 "message": message,
                 "blocked": True,
             }))
             return
 
-        # Persist message to database before broadcasting.
+        # Persist allowed message to database before broadcasting.
         chat_msg = await self.persist_message(self.user, message)
+        await self.log_moderation_event(self.user, chat_msg, mod_result, message)
 
         await self.channel_layer.group_send(
             self.GROUP_NAME,
@@ -129,9 +140,52 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             },
         )
 
+        # Audit sampling: asynchronously audit sample of clean messages
+        if mod_result.audit_sampled:
+            asyncio.create_task(self.run_audit_check(pipeline, self.user, chat_msg, message))
+
+    async def run_audit_check(self, pipeline, user, chat_msg, text: str):
+        """
+        Asynchronously evaluate a fast-pathed clean message with the AI provider.
+        Measures the real miss rate and logs any disagreements.
+        """
+        try:
+            audit_result = await pipeline.provider.evaluate(user, text)
+            if audit_result.verdict != "allowed":
+                pipeline.metrics.audit_disagreements += 1
+                logger.warning(
+                    "Bloom audit disagreement detected! Message '%s' (id=%s) allowed by bloom, but provider verdict=%s (%s)",
+                    text[:50],
+                    chat_msg.id if chat_msg else "none",
+                    audit_result.verdict,
+                    audit_result.reason,
+                )
+                audit_mod = ModerationResult(
+                    stage="audit",
+                    verdict=audit_result.verdict,
+                    bloom_status="clean",
+                    latency_ms=audit_result.latency_ms,
+                    reason=f"audit_disagreement: {audit_result.reason}",
+                )
+                await self.log_moderation_event(user, chat_msg, audit_mod, text)
+        except Exception as exc:
+            logger.debug("Asynchronous bloom audit error: %s", exc)
+
     @database_sync_to_async
     def persist_message(self, user, content: str):
         return ChatService.save_message(sender=user, content=content)
+
+    @database_sync_to_async
+    def log_moderation_event(self, user, message, result, raw_text: str):
+        return ChatService.log_moderation(
+            user=user,
+            message=message,
+            stage=result.stage,
+            verdict=result.verdict,
+            bloom_status=result.bloom_status,
+            latency_ms=result.latency_ms,
+            raw_text=raw_text,
+        )
 
     async def chat_message(self, event):
         await self.send(text_data=json.dumps({
@@ -141,4 +195,4 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             "username": event["username"],
             "display_name": event["display_name"],
             "created_at": event["created_at"],
-        }))
+        }))

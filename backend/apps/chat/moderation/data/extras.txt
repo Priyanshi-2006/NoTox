@@ -1,0 +1,24 @@
+# Extra toxic words and Romanized Hindi slurs for chat moderation Layer 2
+chutiya
+chutiye
+madarchod
+bhenchod
+behenchod
+bhosdike
+bhosadi
+gandu
+harami
+kamina
+kamine
+randi
+saala
+saale
+bhadwe
+bhadwa
+lauda
+lodu
+gaand
+chut
+mc
+bc
+bsdk

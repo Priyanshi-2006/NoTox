@@ -143,7 +143,7 @@ export default function GlobalChat() {
                     setMessages((previous) => [
                         ...previous,
                         {
-                            id: data.id,
+                            id: data.id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `blocked-${Date.now()}-${Math.random()}`),
                             text: data.message,
                             username: data.username,
                             displayName: data.display_name || data.username || "You",
@@ -152,8 +152,11 @@ export default function GlobalChat() {
                                     hour: "2-digit",
                                     minute: "2-digit",
                                 })
-                                : "",
-                            createdAt: data.created_at,
+                                : new Date().toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                }),
+                            createdAt: data.created_at || new Date().toISOString(),
                             blocked: true,
                         },
                     ]);
@@ -337,12 +340,13 @@ export default function GlobalChat() {
                         No messages yet. Start the conversation!
                     </p>
                 ) : (
-                    messages.map((item) => {
+                    messages.map((item, index) => {
                         const isMine = item.blocked || item.username === myUsername;
+                        const messageKey = item.id || `msg-${index}-${item.createdAt || ""}`;
 
                         return (
                             <div
-                                key={item.id}
+                                key={messageKey}
                                 className={`flex w-full ${isMine ? "justify-end" : "justify-start"
                                     }`}
                             >

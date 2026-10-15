@@ -175,7 +175,9 @@ SIMPLE_JWT = {
 # CORS
 # ==================================================
 CORS_ALLOWED_ORIGINS = config(
-    "CORS_ALLOWED_ORIGINS", default="http://localhost:5173", cast=Csv()
+    "CORS_ALLOWED_ORIGINS",
+    default="http://localhost:5173,http://127.0.0.1:5173",
+    cast=Csv(),
 )
 CORS_ALLOW_CREDENTIALS = True
 
@@ -195,3 +197,16 @@ REDIS_PASSWORD = config("REDIS_PASSWORD", default="")
 TWILIO_ACCOUNT_SID = config("TWILIO_ACCOUNT_SID", default="")
 TWILIO_AUTH_TOKEN = config("TWILIO_AUTH_TOKEN", default="")
 TWILIO_VERIFY_SERVICE_SID = config("TWILIO_VERIFY_SERVICE_SID", default="")
+
+# ==================================================
+# Chat Moderation & Bloom Pre-Filter (Stage 3B)
+# ==================================================
+BLOOM_BACKEND = config("BLOOM_BACKEND", default="local")
+BLOOM_REDIS_KEY = config("BLOOM_REDIS_KEY", default="notox:bloom:toxic")
+BLOOM_CAPACITY = config("BLOOM_CAPACITY", default=50000, cast=int)
+BLOOM_ERROR_RATE = config("BLOOM_ERROR_RATE", default=0.001, cast=float)
+BLOOM_TIMEOUT_MS = config("BLOOM_TIMEOUT_MS", default=20, cast=int)
+BLOOM_MIN_TRUST = config("BLOOM_MIN_TRUST", default=80, cast=int)
+BLOOM_MAX_LENGTH = config("BLOOM_MAX_LENGTH", default=500, cast=int)
+BLOOM_AUDIT_RATE = config("BLOOM_AUDIT_RATE", default=0.05, cast=float)
+MODERATION_PROVIDER = config("MODERATION_PROVIDER", default="null")

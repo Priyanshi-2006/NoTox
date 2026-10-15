@@ -396,3 +396,94 @@ class ChatHistoryApiTests(APITestCase):
         self._login(self.restricted_user)
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_history_excludes_blocked_messages(self):
+        self._login(self.user)
+
+        ChatMessage.objects.create(sender=self.user, content="Allowed Message 1", blocked=False)
+        ChatMessage.objects.create(sender=self.user, content="Blocked Message", blocked=True)
+        ChatMessage.objects.create(sender=self.user, content="Allowed Message 2", blocked=False)
+
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        contents = [item["content"] for item in response.data]
+        self.assertIn("Allowed Message 1", contents)
+        self.assertIn("Allowed Message 2", contents)
+        self.assertNotIn("Blocked Message", contents)
+
+
+class WebSocketConsumerModerationTests(TransactionTestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="chat_tester",
+            email="chattester@example.com",
+            password="StrongPass123!",
+            trust_score=100,
+        )
+
+    async def test_websocket_moderation_block_payload_includes_generated_id(self):
+        from apps.chat.models import ModerationLog
+
+        communicator = WebsocketCommunicator(application, "/ws/chat/")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        await communicator.receive_json_from()  # auth_required
+        token = await get_access_token(self.user)
+        await communicator.send_json_to({"type": "authenticate", "token": token})
+        await communicator.receive_json_from()  # authenticated
+
+        # Send toxic message (Layer 1 keyword)
+        await communicator.send_json_to({
+            "type": "message",
+            "message": "fuck this nonsense",
+        })
+
+        resp = await communicator.receive_json_from()
+        self.assertEqual(resp["type"], "moderation_block")
+        self.assertEqual(resp["blocked"], True)
+        self.assertEqual(resp["message"], "fuck this nonsense")
+        self.assertTrue("id" in resp and bool(resp["id"]))
+
+        # Verify ModerationLog row stores offending text for blocked item
+        log = await ModerationLog.objects.select_related("user").afirst()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.verdict, "blocked")
+        self.assertEqual(log.stage, "keyword")
+        self.assertEqual(log.text, "fuck this nonsense")
+
+        await communicator.disconnect()
+
+    async def test_websocket_clean_message_stores_metadata_only_in_moderation_log(self):
+        from apps.chat.models import ModerationLog
+        await ModerationLog.objects.all().adelete()
+
+        communicator = WebsocketCommunicator(application, "/ws/chat/")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        await communicator.receive_json_from()
+        token = await get_access_token(self.user)
+        await communicator.send_json_to({"type": "authenticate", "token": token})
+        await communicator.receive_json_from()
+
+        # Send clean message
+        await communicator.send_json_to({
+            "type": "message",
+            "message": "Hello everyone have a nice day",
+        })
+
+        resp = await communicator.receive_json_from()
+        self.assertEqual(resp["type"], "message")
+        self.assertEqual(resp["message"], "Hello everyone have a nice day")
+
+        # Verify ModerationLog row stores metadata only (text is empty for clean)
+        log = await ModerationLog.objects.filter(verdict="allowed").afirst()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.verdict, "allowed")
+        self.assertEqual(log.bloom_status, "clean")
+        self.assertEqual(log.stage, "bloom")
+        self.assertEqual(log.text, "")
+
+        await communicator.disconnect()
+

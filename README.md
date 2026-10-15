@@ -69,6 +69,30 @@ notox/
 - **Frontend Resilience:** Automatic WebSocket reconnection with capped exponential backoff, single silent token refresh retry on `4401`, clear restricted status banner, and historical message loading.
 - **Channel Layer:** Configured with `InMemoryChannelLayer` for local development and testing (note: `channels-redis` is required for multi-process or production use).
 
+### Stage 3B — Bloom Pre-Filter as Chat Moderation Layer 2
+- **Three-Layer Moderation Pipeline:** `Keyword Filter (L1)` &rarr; `Bloom Pre-Check (L2)` &rarr; `AI Provider (L3)`.
+  - **Layer 1:** Instant profanity blocking via keyword matcher with unique message IDs.
+  - **Layer 2 (Bloom Pre-Filter):** Fast-path evaluation bypassing Layer 3 for clean messages with zero toxic token hits.
+  - **Layer 3:** Asynchronous AI provider interface (`NullProvider` default, `MockProvider` with simulated latency and ground truth rules).
+- **Fast-Path Eligibility:** Messages are only marked `clean` if:
+  1. No toxic-set hit in Bloom filter.
+  2. Sender `trust_score >= BLOOM_MIN_TRUST` (default 80).
+  3. No URL detected.
+  4. Content is mostly ASCII (&ge; 80%).
+  5. Content length is within `BLOOM_MAX_LENGTH` (default 500 characters).
+  Otherwise, messages are treated as `uncertain` and forwarded to Layer 3.
+- **Normalization Invariant:** Generates lowercase, NFKC, zero-width stripped, collapsed repeats, de-leeted, and spaced-letter joined variants. Unigram and bigram lookup keys are combined monotonically as a set union — normalization only adds candidate keys and can only raise the uncertain rate, never turning an uncertain message into clean.
+- **Backends & Sizing:**
+  - `LocalBloomBackend`: In-memory bit array with Kirsch-Mitzenmacher double-hashing using SHA-256 slices ($m \approx 718\text{k bits} \approx 90\text{ KB}$, $k=10$ for $n=50\text{k}, p=0.001$).
+  - `RedisBloomBackend`: High-concurrency backend using `redis.asyncio` with raw `execute_command("BF.MEXISTS", ...)` (one round trip per message).
+- **Fail-Safe Resilience:** If Redis is down, the module is missing, or the call times out beyond `BLOOM_TIMEOUT_MS`, the message fails safe to `uncertain` and is sent to the provider. Failures are logged at most once per minute to avoid log spamming.
+- **Audit Sampling & Measurement:** Configurable `BLOOM_AUDIT_RATE` (default 5%) asynchronously audits clean messages with Layer 3 to continually measure the empirical miss rate. Disagreements are logged.
+- **ModerationLog Auditing:** `ModerationLog` model records pipeline stage, verdict, bloom status, and latency. Clean messages record metadata only for privacy, while offending text is stored only for blocked or flagged messages.
+- **Reworded FR7:** The functional requirement FR7 has been formally reworded to specify the Layer 2 Bloom pre-filter safety guarantee (zero false negatives on toxic set, >=75% provider call reduction, audit sampling). See `docs/SRS_SDS_UPDATES.md`.
+- **Management Commands:**
+  - `python manage.py bloom_seed`: Idempotently seeds the Bloom filter with toxic words from `better_profanity` and custom extras (e.g. Romanized Hindi slurs).
+  - `python manage.py benchmark_bloom`: Runs automated benchmarks measuring API reduction (77.55%), latency speedup (2.57x-3.49x), empirical FPR, and labeled dataset miss rate (0.00%). Results saved to `docs/BENCHMARK_REPORT.md`.
+
 ---
 
 ## API Endpoints
