@@ -1,137 +1,213 @@
-# NoTox
+# NoTox — Real-Time Contextual & Visual Moderation Platform
 
-**NoTox** is a real-time contextual and visual moderation platform designed for online chat, social communities, and livestreaming. The platform is being built incrementally across 14 developmental stages.
-
----
-
-## Tech Stack
-
-- **Backend:** Python 3.11+, Django 5, Django REST Framework, `djangorestframework-simplejwt`, PostgreSQL
-- **Frontend:** React 18, Vite, Tailwind CSS, Axios, React Router
-- **Real-Time Communication:** WebSockets using Django Channels
-- **Architecture:** Modular Django app architecture with decoupled REST APIs and a responsive SPA frontend
+**NoTox** is a real-time contextual moderation platform engineered for online chat, community discussions, and livestreaming. It features a progressive 3-stage moderation pipeline designed to eliminate toxic content while drastically reducing expensive AI moderation API overhead.
 
 ---
 
-## Project Structure
+## ⚡ Key Highlights
 
-notox/
+- **Multi-Stage Moderation Pipeline:** Layer 1 Keyword Filter $\rightarrow$ Layer 2 Bloom Pre-Check $\rightarrow$ Layer 3 AI Provider.
+- **77.5%+ AI Call Reduction:** Clean messages from trusted users bypass AI provider calls via high-speed Bloom pre-filtering.
+- **Zero False Negatives Target:** Strict mathematical guarantees ensure no seeded toxic word or obfuscation bypasses Layer 2.
+- **Trust Score Engine:** Dynamic trust scores ($0 - 100$) gating user privileges and fast-path moderation.
+- **High Concurrency & Resilience:** Asynchronous WebSockets via Django Channels with automatic fail-safe fallback if cache layers go offline.
 
-├── backend/
-│   ├── config/              # Root settings, routing, WSGI/ASGI configurations
-│   ├── apps/
-│   │   ├── accounts/        # User accounts, authentication, profiles & trust score service
-│   │   └── chat/            # Real-time global chat using Django Channels
-│   ├── manage.py
-│   ├── requirements.txt
-│   └── .env.example
-└── frontend/
-    ├── src/
-    │   ├── components/      # Reusable UI components (Navbar, ProtectedRoute, LoadingSpinner)
-    │   ├── context/         # AuthContext (global authentication & profile state)
-    │   ├── hooks/           # useAuth hook
-    │   ├── layouts/         # MainLayout shell
-    │   ├── pages/           # Landing, Login, Register, Profile, Dashboard, GlobalChat
-    │   ├── services/        # api.js (Axios client & interceptors), authService.js
-    │   └── utils/           # Client-side form validators
-    ├── package.json
-    └── .env.example
+---
+
+## 🛠 Tech Stack
+
+| Domain | Technologies |
+|---|---|
+| **Backend** | Python 3.11+, Django 5, Django REST Framework, Django Channels (ASGI), Daphne |
+| **Authentication** | JWT (`djangorestframework-simplejwt`) with rotation & blacklisting |
+| **Databases & Cache** | PostgreSQL (persistent storage), SQLite (dev), Redis / Memurai (Channels & Bloom Filter) |
+| **Chat Moderation** | `better-profanity`, RedisBloom / In-Memory Double-Hash Bloom Filter, AI Provider Hooks |
+| **Frontend** | React 18, Vite, Tailwind CSS, Axios, React Router, WebSockets |
+
+---
+
+## 🏗 Architecture & Moderation Pipeline
+
+```
+[ Incoming Message ]
+         │
+         ▼
+┌─────────────────────────────────┐
+│   Layer 1: Keyword Filter       │ ──► [ Toxic Match ] ──► Instant Block (403)
+│   (better_profanity + rules)    │
+└─────────────────────────────────┘
+         │ (Passed)
+         ▼
+┌─────────────────────────────────┐
+│   Layer 2: Bloom Pre-Check      │
+│   (NFKC, de-leet, repeats,      │
+│    spaced-letters, bigrams)     │
+└─────────────────────────────────┘
+         │
+         ├─── [ Eligible Clean Message ] ─────────► [ Fast-Path Allow ] (Sub-millisecond)
+         │    • No toxic-set hit                         │
+         │    • trust_score >= BLOOM_MIN_TRUST           │ (5% Async Audit Sample)
+         │    • No URLs detected                         ▼
+         │    • Content is mostly ASCII          ┌───────────────────────────────────┐
+         │    • Message length within cap        │   Layer 3: AI Provider            │
+         │                                       │   (Null / Mock / Perspective /    │
+         └─── [ Uncertain / Toxic Match ] ──────►│    Toxic-BERT / OpenAI)           │
+                                                 └───────────────────────────────────┘
+                                                           │
+                                                           ▼
+                                                 [ Final Verdict & Log ]
 ```
 
 ---
 
-## Stages Implemented
+## 📂 Project Structure
 
-### Stage 1 — Project Foundation & Authentication
-- **Custom User Model:** UUID-keyed `User` model inheriting from `AbstractBaseUser` and `PermissionsMixin`.
-- **JWT Authentication:** Secure registration, login (via username or email), token rotation, silent token refreshing, and refresh token blacklisting on logout.
-- **Frontend Auth Integration:** React authentication context, persistent tokens in storage with automatic Axios 401 interceptor retry, route protection, and form validation.
-- **Database & Error Handling:** PostgreSQL integration with unified DRF exception responses.
-
-### Stage 2 — User Profiles & Trust Score Foundation
-- **User Profiles:** Extended user schema with `display_name`, `bio`, `avatar` (URL), `phone_number`, `role`, and `trust_score`.
-- **Role System:** Defined role choices (`user`, `moderator`, `admin`) with reusable permission classes (`IsAdminRole`, `IsModeratorRole`).
-- **Trust Score Engine Foundation:**
-  - Initial score initialized to `100`.
-  - Strict bounded range between `0` and `100`.
-  - Centralized `TrustScoreService` (`clamp_score`, `set_trust_score`, `increase_trust_score`, `decrease_trust_score`, `reset_trust_score`).
-- **Profile API:** Authenticated `GET` and `PATCH` endpoints on `/api/profile/` and `/api/auth/me/`. Users can update safe fields (`display_name`, `bio`, `avatar`), while system fields (`trust_score`, `role`, `strikes`, `restrictions`) are strictly immutable via the API.
-- **Profile UI:** Interactive profile dashboard featuring avatar display, role badges, trust score meter (`████████████████████ 100/100`), status tier badges, and inline profile editing with live preview.
-- **Automated Tests:** 24 unit and API tests validating authentication, profile retrieval/update, authorization boundaries, trust score clamping/mutations, and cross-user isolation.
-
-### Stage 3A — Chat foundation (early)
-- **ChatMessage Persistence:** UUID-keyed `ChatMessage` model with nullable `sender` FK, `content` (up to 2000 characters), and indexed `created_at` timestamp.
-- **WebSocket Protocol & Lifecycle:** ASGI-routed WebSocket on `ws://localhost:8000/ws/chat/` with two-step handshake (`auth_required` -> `authenticate`).
-- **Restriction-Aware Access:** Integrated `User.is_currently_restricted()` with lazy clearance of expired restrictions. Restricted users receive close code `4403` on connect and mid-session.
-- **Token Expiry Enforcement:** Evaluates access token `exp` timestamp on incoming messages, terminating expired sessions with close code `4401`.
-- **Pre-Broadcast Storage:** Messages are saved via `database_sync_to_async` before group broadcast, delivering consistent server `id` and ISO `created_at` timestamps to all clients.
-- **Message History API:** `GET /api/chat/messages/` protected by `IsAuthenticated` and `IsNotRestricted`, returning the latest 50 messages oldest-first with `before` cursor ISO pagination.
-- **Frontend Resilience:** Automatic WebSocket reconnection with capped exponential backoff, single silent token refresh retry on `4401`, clear restricted status banner, and historical message loading.
-- **Channel Layer:** Configured with `InMemoryChannelLayer` for local development and testing (note: `channels-redis` is required for multi-process or production use).
-
-### Stage 3B — Bloom Pre-Filter as Chat Moderation Layer 2
-- **Three-Layer Moderation Pipeline:** `Keyword Filter (L1)` &rarr; `Bloom Pre-Check (L2)` &rarr; `AI Provider (L3)`.
-  - **Layer 1:** Instant profanity blocking via keyword matcher with unique message IDs.
-  - **Layer 2 (Bloom Pre-Filter):** Fast-path evaluation bypassing Layer 3 for clean messages with zero toxic token hits.
-  - **Layer 3:** Asynchronous AI provider interface (`NullProvider` default, `MockProvider` with simulated latency and ground truth rules).
-- **Fast-Path Eligibility:** Messages are only marked `clean` if:
-  1. No toxic-set hit in Bloom filter.
-  2. Sender `trust_score >= BLOOM_MIN_TRUST` (default 80).
-  3. No URL detected.
-  4. Content is mostly ASCII (&ge; 80%).
-  5. Content length is within `BLOOM_MAX_LENGTH` (default 500 characters).
-  Otherwise, messages are treated as `uncertain` and forwarded to Layer 3.
-- **Normalization Invariant:** Generates lowercase, NFKC, zero-width stripped, collapsed repeats, de-leeted, and spaced-letter joined variants. Unigram and bigram lookup keys are combined monotonically as a set union — normalization only adds candidate keys and can only raise the uncertain rate, never turning an uncertain message into clean.
-- **Backends & Sizing:**
-  - `LocalBloomBackend`: In-memory bit array with Kirsch-Mitzenmacher double-hashing using SHA-256 slices ($m \approx 718\text{k bits} \approx 90\text{ KB}$, $k=10$ for $n=50\text{k}, p=0.001$).
-  - `RedisBloomBackend`: High-concurrency backend using `redis.asyncio` with raw `execute_command("BF.MEXISTS", ...)` (one round trip per message).
-- **Fail-Safe Resilience:** If Redis is down, the module is missing, or the call times out beyond `BLOOM_TIMEOUT_MS`, the message fails safe to `uncertain` and is sent to the provider. Failures are logged at most once per minute to avoid log spamming.
-- **Audit Sampling & Measurement:** Configurable `BLOOM_AUDIT_RATE` (default 5%) asynchronously audits clean messages with Layer 3 to continually measure the empirical miss rate. Disagreements are logged.
-- **ModerationLog Auditing:** `ModerationLog` model records pipeline stage, verdict, bloom status, and latency. Clean messages record metadata only for privacy, while offending text is stored only for blocked or flagged messages.
-- **Reworded FR7:** The functional requirement FR7 has been formally reworded to specify the Layer 2 Bloom pre-filter safety guarantee (zero false negatives on toxic set, >=75% provider call reduction, audit sampling). See `docs/SRS_SDS_UPDATES.md`.
-- **Management Commands:**
-  - `python manage.py bloom_seed`: Idempotently seeds the Bloom filter with toxic words from `better_profanity` and custom extras (e.g. Romanized Hindi slurs).
-  - `python manage.py benchmark_bloom`: Runs automated benchmarks measuring API reduction (77.55%), latency speedup (2.57x-3.49x), empirical FPR, and labeled dataset miss rate (0.00%). Results saved to `docs/BENCHMARK_REPORT.md`.
+```text
+notox/
+├── backend/
+│   ├── config/                      # Settings, ASGI routing, WSGI
+│   ├── apps/
+│   │   ├── accounts/                # User model, JWT authentication, Trust Score service
+│   │   ├── chat/                    # Real-time WebSocket consumers, services, models
+│   │   │   ├── moderation/          # Normalization, tokenization, Bloom backends, providers
+│   │   │   └── management/commands/ # bloom_seed & benchmark_bloom commands
+│   │   └── streams/                 # Livestreaming consumer & WebRTC signaling
+│   ├── manage.py
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── components/              # Navbar, ProtectedRoute, LoadingSpinner
+│   │   ├── context/                 # AuthContext (state & tokens)
+│   │   ├── pages/                   # GlobalChat, Dashboard, Profile, Login, Register
+│   │   └── services/                # Axios API client, WebSocket handlers
+│   └── package.json
+└── docs/
+    ├── BENCHMARK_REPORT.md          # Automated benchmark results & miss-rate findings
+    └── SRS_SDS_UPDATES.md           # Formal specifications & reworded FR7
+```
 
 ---
 
-## API Endpoints
+## 🚀 Development Roadmap & Completed Stages
+
+<details open>
+<summary><b>Stage 1 — Project Foundation & Authentication</b></summary>
+<br>
+
+- **Custom User Model:** UUID-keyed `User` model (`AbstractBaseUser` + `PermissionsMixin`).
+- **JWT Authentication:** Registration, login (username or email), silent token rotation, and blacklisting.
+- **Frontend Auth Integration:** React context with persistent storage, auto-retry Axios 401 interceptor, and route guards.
+- **Database & Errors:** Unified DRF exception handler and PostgreSQL schema.
+</details>
+
+<details open>
+<summary><b>Stage 2 — User Profiles & Trust Score Engine</b></summary>
+<br>
+
+- **User Profiles:** Safe fields (`display_name`, `bio`, `avatar`, `phone_number`, `role`).
+- **Role-Based Access Control:** Reusable permissions for `User`, `Moderator`, and `Admin`.
+- **Trust Score Engine:** Standardized range ($0 - 100$, default $100$) with `TrustScoreService` mutation helpers.
+- **Interactive UI:** Live profile dashboard with avatar preview and trust score meter.
+</details>
+
+<details open>
+<summary><b>Stage 3A — Real-Time Chat Foundation</b></summary>
+<br>
+
+- **ChatMessage Persistence:** UUID-keyed `ChatMessage` model with indexed `created_at` timestamps.
+- **WebSocket Protocol:** ASGI two-step handshake (`auth_required` $\rightarrow$ `authenticate`).
+- **Restriction Enforcement:** Automatic disconnection (code `4403`) for restricted accounts and expired token cutoff (code `4401`).
+- **History API:** `GET /api/chat/messages/` with cursor-based pagination, returning oldest-first history.
+</details>
+
+<details open>
+<summary><b>Stage 3B — Bloom Pre-Filter as Chat Moderation Layer 2</b></summary>
+<br>
+
+- **3-Layer Pipeline:** Keyword Filter (L1) $\rightarrow$ Bloom Pre-Check (L2) $\rightarrow$ AI Provider (L3).
+- **Fast-Path Eligibility:** Clean verdict is honored only when:
+  1. Zero toxic-set hits in Bloom filter.
+  2. Sender `trust_score >= BLOOM_MIN_TRUST` (default 80).
+  3. No URLs present.
+  4. Content is mostly ASCII (&ge; 80%).
+  5. Message length is within `BLOOM_MAX_LENGTH` (default 500 chars).
+- **Monotonic Normalization Invariant:** Keys are unigrams and bigrams derived from NFKC normalization, zero-width character stripping, repeat collapsing, de-leeting, and spaced-letter joining. Normalization only adds candidate keys and can only raise the uncertain rate, never lowering it.
+- **Dual Backends:**
+  - `LocalBloomBackend`: In-memory bit array with Kirsch-Mitzenmacher double-hashing ($m \approx 90\text{ KB}, k=10$ for $n=50\text{k}, p=0.001$).
+  - `RedisBloomBackend`: Async raw `BF.MEXISTS` command executing in a single round-trip per message.
+- **Fail-Safe & Rate-Limited Logging:** If Redis is down or times out (`BLOOM_TIMEOUT_MS`), messages fail-safe to `uncertain` and route to the provider. Failures are logged at most once per minute.
+- **Audit Sampling & Logging:** 5% of clean messages are asynchronously evaluated by the provider to continuously monitor real miss rates. Disagreements and outcomes are recorded in `ModerationLog`.
+- **Reworded FR7:** Formally reworded to specify Layer 2 Bloom safety guarantees and audit requirements (see [`docs/SRS_SDS_UPDATES.md`](docs/SRS_SDS_UPDATES.md)).
+</details>
+
+---
+
+## 📊 Benchmark Summary (Stage 3B)
+
+Automated benchmarks measure performance across the three SDS axes, empirical miss rates, and clean traffic uncertain rates:
+
+| Metric | Without Bloom Filter | With Bloom Filter (Layer 2) | Improvement |
+|---|:---:|:---:|:---:|
+| **Provider API Calls (300 msgs)** | 245 calls | 55 calls | **77.55% Reduction** |
+| **Mean End-to-End Latency** | 26.24 ms | 11.66 ms | **2.25x Speedup** |
+| **p50 (Median) Latency** | 30.67 ms | 9.52 ms | **3.22x Speedup** |
+| **Local Lookup Latency** | — | **0.128 ms** | Sub-millisecond |
+| **Measured Toxic Miss Rate** | — | **0.00%** | Zero false negatives |
+| **Clean Fast-Patched Traffic** | 0.00% | **95.00%** | 95% skip Layer 3 |
+
+*Detailed benchmark methodology and FPR sweeps available in [`docs/BENCHMARK_REPORT.md`](docs/BENCHMARK_REPORT.md).*
+
+---
+
+## 🔌 API & WebSocket Reference
+
+### REST Endpoints
 
 | Method | Endpoint | Auth Required | Description |
-|---|---|---|---|
-| POST | `/api/auth/register/` | No | Create an account, returns user data + JWT tokens |
-| POST | `/api/auth/login/` | No | Authenticate with username/email and password |
-| POST | `/api/auth/logout/` | Yes | Blacklist refresh token and log out |
-| POST | `/api/auth/token/refresh/` | No | Obtain new access token via refresh token |
-| GET | `/api/auth/me/` | Yes | Retrieve authenticated user's profile |
-| PATCH | `/api/auth/me/` | Yes | Update safe profile fields (`display_name`, `bio`, `avatar`) |
-| GET | `/api/profile/` | Yes | Retrieve authenticated user's profile |
-| PATCH | `/api/profile/` | Yes | Update safe profile fields (`display_name`, `bio`, `avatar`) |
-| GET | `/api/chat/messages/` | Yes (Unrestricted) | Retrieve latest 50 chat messages (oldest-first, optional `before` cursor) |
+|---|---|:---:|---|
+| `POST` | `/api/auth/register/` | No | Register new user account |
+| `POST` | `/api/auth/login/` | No | Authenticate and obtain JWT token pair |
+| `POST` | `/api/auth/token/refresh/` | No | Refresh expired access token |
+| `POST` | `/api/auth/logout/` | Yes | Blacklist refresh token and log out |
+| `GET` | `/api/auth/me/` | Yes | Retrieve current user profile |
+| `PATCH` | `/api/profile/` | Yes | Update profile fields (`display_name`, `bio`, `avatar`) |
+| `GET` | `/api/chat/messages/` | Yes | Fetch chat history (50 messages, oldest-first, cursor pagination) |
 
-## WebSocket Endpoint
-| Protocol | Endpoint | Auth Required | Description |
-| ---|---|---|---|
-| WebSocket | ws://localhost:8000/ws/chat/ | JWT Access Token | Real-time global chat communication |
+### WebSocket Endpoint
+
+| Protocol | Endpoint | Handshake | Purpose |
+|---|---|---|---|
+| `ws://` / `wss://` | `/ws/chat/` | `auth_required` $\rightarrow$ `authenticate` | Real-time chat & moderation streaming |
 
 ---
 
-## Getting Started
+## 💻 Getting Started
 
 ### 1. Backend Setup
 
 ```bash
 cd backend
-python -m venv .venv
-# Activate virtual environment:
-# Windows: .\.venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
 
+# Create and activate virtual environment
+python -m venv .venv
+# Windows:
+.\.venv\Scripts\activate
+# macOS/Linux:
+# source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Configure environment variables
 cp .env.example .env
 
-# Configure database in .env, then migrate:
+# Run database migrations
 python manage.py migrate
+
+# Seed Bloom filter with toxic words
+python manage.py bloom_seed
+
+# Start ASGI development server
 python manage.py runserver
 ```
 
@@ -139,16 +215,22 @@ python manage.py runserver
 
 ```bash
 cd frontend
+
+# Install packages
 npm install
+
+# Configure environment variables
 cp .env.example .env
+
+# Start Vite dev server
 npm run dev
 ```
 
-The frontend will run at `http://localhost:5173/` and communicate with the backend at `http://localhost:8000/api/`.
+The frontend runs at `http://localhost:5173/` and proxies API requests to `http://localhost:8000/`.
 
 ---
 
-## Running Tests
+## 🧪 Testing & Verification
 
 Run the full backend test suite:
 
@@ -157,3 +239,14 @@ cd backend
 python manage.py test
 ```
 
+Run moderation-specific property and fail-safe tests:
+
+```bash
+python manage.py test apps.chat.tests_moderation
+```
+
+Run the automated Bloom performance benchmark:
+
+```bash
+python manage.py benchmark_bloom --save-report ../docs/BENCHMARK_REPORT.md
+```
