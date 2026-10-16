@@ -37,6 +37,8 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.chat",
     "apps.streams",
+    "apps.stream_moderation",
+    "apps.transcription",
 ]
 
 MIDDLEWARE = [
@@ -209,4 +211,17 @@ BLOOM_TIMEOUT_MS = config("BLOOM_TIMEOUT_MS", default=20, cast=int)
 BLOOM_MIN_TRUST = config("BLOOM_MIN_TRUST", default=80, cast=int)
 BLOOM_MAX_LENGTH = config("BLOOM_MAX_LENGTH", default=500, cast=int)
 BLOOM_AUDIT_RATE = config("BLOOM_AUDIT_RATE", default=0.05, cast=float)
-MODERATION_PROVIDER = config("MODERATION_PROVIDER", default="null")
+MODERATION_PROVIDER = config("MODERATION_PROVIDER", default="null")
+
+# ==================================================
+# Vosk Speech Recognition Model
+# ==================================================
+VOSK_MODEL_PATH = BASE_DIR / "models" / "vosk-model-small-en-us-0.15"
+
+# ==================================================
+# Profanity Moderation Wordlist
+# ==================================================
+PROFANITY_WORDLIST_PATH = config(
+    "PROFANITY_WORDLIST_PATH",
+    default=str(BASE_DIR / "wordlists" / "profanity_wordlist.txt"),
+)

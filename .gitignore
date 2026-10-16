@@ -42,3 +42,7 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
+
+# STT Models and Archives
+models/
+*.zip

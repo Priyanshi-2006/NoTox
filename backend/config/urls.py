@@ -8,5 +8,5 @@ urlpatterns = [
     path("api/profile/", ProfileView.as_view(), name="profile"),
     path("api/chat/", include("apps.chat.urls")),
     path("api/streams/", include("apps.streams.urls")),
+    path("api/stream-moderation/", include("apps.stream_moderation.urls")),
 ]
-

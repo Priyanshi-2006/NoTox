@@ -17,8 +17,9 @@ django_asgi_app = get_asgi_application()
 from channels.routing import ProtocolTypeRouter, URLRouter
 from apps.chat.routing import websocket_urlpatterns as chat_ws_urlpatterns
 from apps.streams.routing import websocket_urlpatterns as stream_ws_urlpatterns
+from apps.transcription.routing import websocket_urlpatterns as transcription_ws_urlpatterns
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
-    "websocket": URLRouter(chat_ws_urlpatterns + stream_ws_urlpatterns),
+    "websocket": URLRouter(chat_ws_urlpatterns + stream_ws_urlpatterns + transcription_ws_urlpatterns),
 })
