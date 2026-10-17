@@ -23,8 +23,15 @@ export default function Watch() {
         pc?.close();
         pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
         pc.ontrack = (e) => {
-          videoRef.current.srcObject = e.streams[0];
-          setStatus("Live");
+          if (videoRef.current && e.streams[0]) {
+            if (videoRef.current.srcObject !== e.streams[0]) {
+              videoRef.current.srcObject = e.streams[0];
+            }
+            videoRef.current.play().catch((err) => {
+              console.warn("[NoTox Watch] Play notice:", err);
+            });
+            setStatus("Live");
+          }
         };
         pc.onicecandidate = (e) => {
           if (e.candidate) {

@@ -23,3 +23,6 @@ daphne==4.1.2
 
 # Chat moderation
 better-profanity==0.7.0
+
+# Speech recognition
+vosk>=0.3.45
