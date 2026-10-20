@@ -14,24 +14,21 @@ export default function Navbar() {
   return (
     <header className="border-b border-slate-200 bg-white">
       <nav className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-        <Link to="/" className="flex items-center gap-2 text-xl font-bold text-slate-900">
+        <div to="/" className="flex items-center gap-2 text-xl font-bold text-slate-900">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">
             N
           </span>
           NoTox
-        </Link>
+        </div>
 
         <div className="flex items-center gap-6 text-sm font-medium text-slate-600">
           {isAuthenticated ? (
             <>
-              <Link to="/dashboard" className="hover:text-brand-600">
-                Dashboard
-              </Link>
 
               <Link to="/chat" className="hover:text-brand-600">
                 Global Chat
               </Link>
-              
+
               <Link to="/streams" className="hover:text-brand-600">
                 Live
               </Link>

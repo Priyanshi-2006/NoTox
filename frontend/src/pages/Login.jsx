@@ -13,7 +13,7 @@ export default function Login() {
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const redirectTo = location.state?.from?.pathname || "/dashboard";
+  const redirectTo = location.state?.from?.pathname || "/chat";
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
