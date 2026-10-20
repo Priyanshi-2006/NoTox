@@ -52,14 +52,23 @@
          │    • No toxic-set hit                         │
          │    • trust_score >= BLOOM_MIN_TRUST           │ (5% Async Audit Sample)
          │    • No URLs detected                         ▼
-         │    • Content is mostly ASCII          ┌───────────────────────────────────┐
-         │    • Message length within cap        │   Layer 3: AI Provider            │
-         │                                       │   (Null / Mock / Perspective /    │
-         └─── [ Uncertain / Toxic Match ] ──────►│    Toxic-BERT / OpenAI)           │
-                                                 └───────────────────────────────────┘
-                                                           │
-                                                           ▼
-                                                 [ Final Verdict & Log ]
+         │    • Content is mostly ASCII          ┌───────────────────────────────────────────────┐
+         │    • Message length within cap        │  Layer 3: AI Provider & Contextual Analysis   │
+         │                                       │  • HuggingFace Inference / Mock / Null        │
+         └─── [ Uncertain / Toxic Match ] ──────►│  • Bounded context window (recent messages)   │
+                                                 │  • Clamped scores: toxicity, insult, threat   │
+                                                 └───────────────────────────────────────────────┘
+                                                                 │
+                                                                 ▼
+                                                 ┌───────────────────────────────────────────────┐
+                                                 │  Moderation Policy Engine                     │
+                                                 │  • ALLOW  : Clean / harmless sarcasm / banter │
+                                                 │  • REVIEW : Ambiguous / amber zone (flagged)  │
+                                                 │  • BLOCK  : Threat / high toxicity / insult   │
+                                                 └───────────────────────────────────────────────┘
+                                                                 │
+                                                                 ▼
+                                                 [ Final Verdict & ModerationLog ]
 ```
 
 ### Live Audio Moderation & Pre-Broadcast Censorship Pipeline
@@ -205,6 +214,22 @@ notox/
 - **Timeline Synchronization:** Automatic timeline offset calibration (`voskStreamOffset`) synchronizes Vosk recognition intervals with the circular audio buffer playout index regardless of WebSocket connection latency.
 </details>
 
+<details open>
+<summary><b>Stage 5 — Layer 3 Contextual Moderation & Policy Engine</b></summary>
+<br>
+
+- **Context-Aware Classification:** Bounded conversational context window (`CONTEXT_WINDOW_SIZE`, default 5 messages) passed to Layer 3 for evaluating subtle and indirect hostility without loading full history.
+- **HuggingFace Inference Provider:** Native async integration via `HuggingFaceProvider` using official Inference API endpoints (default: `unitary/toxic-bert`) with bounded input length, configurable timeouts (`HF_API_TIMEOUT`), and rate-limit/outage guards.
+- **Structured Output Contract:** Validated `ContextualResult` tracking clamped scores (`toxicity_score`, `harassment_score`, `threat_score`, `insult_score`, `confidence`), `intent_label`, `target_type`, and `sarcasm_detected`.
+- **Defense-in-Depth Validation:** All model outputs clamped to $[0.0, 1.0]$, controlled-vocabulary validation for labels, NaN sentinel representation, and protection against prompt injection by isolating context as raw data.
+- **Decoupled Moderation Policy Engine:** Evaluates scores independently of provider:
+  - **ALLOW:** Clean content, harmless sarcasm, friendly banter, and ordinary disagreement.
+  - **REVIEW (`flagged`):** Scores within configurable amber zone (`POLICY_REVIEW_THRESHOLD`, default 0.60).
+  - **BLOCK (`blocked`):** Severe violations exceeding policy thresholds (`POLICY_THREAT_BLOCK` = 0.80, `POLICY_TOXICITY_BLOCK` = 0.85, `POLICY_HARASSMENT_BLOCK` = 0.80).
+- **Sarcasm Safety Invariant:** Sarcasm alone never triggers an automatic block; harmful statements are evaluated by their explicit harm score regardless of ironic presentation.
+- **Fail-Safe & Tokenless Operation:** Graceful fallback to `allow` on provider timeouts, 429 rate limits, 401 auth errors, or outages; completely operational locally with `MODERATION_PROVIDER=null` or `mock` without an API key.
+</details>
+
 ---
 
 ## 📊 Benchmark Summary (Stage 3B)
@@ -310,9 +335,52 @@ The backend supports configuration via `backend/.env`. Key settings include:
 | `BLOOM_BACKEND` | `local` | Chat Bloom filter backend (`local` or `redis`) |
 | `BLOOM_CAPACITY` | `50000` | Expected number of items in the Bloom filter |
 | `BLOOM_ERROR_RATE` | `0.001` | Desired false positive probability ($p=0.1\%$) |
-| `MODERATION_PROVIDER` | `null` | AI moderation provider (`null`, `mock`, `perspective`, `openai`) |
+| `BLOOM_MIN_TRUST` | `80` | Minimum sender trust score required for Bloom fast-path eligibility |
+| `MODERATION_PROVIDER` | `null` | AI moderation provider (`null`, `mock`, `huggingface`) |
+| `HF_API_TOKEN` | `""` | Hugging Face User Access Token (read-only; optional in dev) |
+| `HF_MODEL_ID` | `unitary/toxic-bert` | Hugging Face model identifier for classification |
+| `HF_API_TIMEOUT` | `5` | Request timeout in seconds for Hugging Face inference |
+| `HF_MAX_INPUT_LENGTH` | `512` | Max character length for inputs sent to the provider |
+| `CONTEXT_WINDOW_SIZE` | `5` | Bounded number of preceding messages for contextual evaluation |
+| `POLICY_TOXICITY_BLOCK` | `0.85` | Toxicity score threshold for instant block |
+| `POLICY_THREAT_BLOCK` | `0.80` | Threat score threshold for instant block |
+| `POLICY_HARASSMENT_BLOCK`| `0.80` | Harassment score threshold for instant block |
+| `POLICY_REVIEW_THRESHOLD` | `0.60` | Score threshold for flagging content into `review` status |
 
-### 4. Running Live Stream Audio Moderation
+### 4. Layer 3 Contextual Moderation Configuration
+
+#### Running Without an API Key (Default Dev Mode)
+No external API token is required to run the development environment. When `MODERATION_PROVIDER=null` (the default), clean messages bypass to fast-path and uncertain messages pass through without hitting external APIs. In test environments, `MODERATION_PROVIDER=mock` provides deterministic simulation.
+
+#### Configuring Hugging Face Inference
+1. Create a free Hugging Face account at [huggingface.co](https://huggingface.co).
+2. Generate a **Read** token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
+3. Set the following in `backend/.env`:
+   ```bash
+   MODERATION_PROVIDER=huggingface
+   HF_API_TOKEN=hf_yourTokenHere
+   HF_MODEL_ID=unitary/toxic-bert
+   ```
+4. **Model Capabilities & Selection:**
+   - Default model: `unitary/toxic-bert` (multi-label toxicity classification including `toxic`, `severe_toxic`, `obscene`, `threat`, `insult`, `identity_hate`).
+   - The provider automatically handles cold starts (HTTP 503), rate limits (HTTP 429), and authorization errors (HTTP 401) with fail-safe fallback to allow, ensuring WebSocket chat responsiveness is never blocked indefinitely.
+
+#### Context Window & Bloom Fast-Path Interaction
+- Clean messages from trusted users (`trust_score >= 80`, no URLs, mostly ASCII, within length cap) continue to be fast-pathed through Layer 2 Bloom filtering in sub-milliseconds without triggering provider calls.
+- Only uncertain messages or messages failing fast-path eligibility reach Layer 3.
+- When Layer 3 is reached, a bounded context window (`CONTEXT_WINDOW_SIZE`, default 5 messages) is provided to disambiguate subtle hostility, banter, sarcasm, or personal attacks without loading full conversation histories.
+
+#### Moderation Policy Engine Decisions
+- **ALLOW:** No violation detected; includes friendly banter, harmless sarcasm, and ordinary disagreement.
+- **REVIEW (`flagged`):** Borderline or ambiguous scores between `POLICY_REVIEW_THRESHOLD` (0.60) and block thresholds.
+- **BLOCK (`blocked`):** Explicit violations exceeding policy thresholds (`threat >= 0.80`, `toxicity >= 0.85`, `harassment >= 0.80`, `insult >= 0.80`).
+- **Sarcasm Safety Invariant:** Sarcasm detection alone **never** triggers an automatic block. Harmful statements are evaluated on their explicit harm score regardless of sarcastic presentation.
+
+#### Privacy & Security
+- Context and incoming messages are treated as **untrusted user content** and passed strictly as classification inputs, preventing prompt injection attacks.
+- Tokens and secrets are read exclusively from backend environment variables and are never logged, stored in databases, or exposed to browser code (`VITE_API_BASE_URL` remains isolated).
+
+### 5. Running Live Stream Audio Moderation
 
 1. Start both the backend (Daphne/ASGI server on port `8000`) and frontend (Vite on port `5173`).
 2. Log in or register an account at `http://localhost:5173/`.

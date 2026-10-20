@@ -214,6 +214,38 @@ BLOOM_AUDIT_RATE = config("BLOOM_AUDIT_RATE", default=0.05, cast=float)
 MODERATION_PROVIDER = config("MODERATION_PROVIDER", default="null")
 
 # ==================================================
+# Layer 3 Contextual Moderation — HuggingFace Provider
+# ==================================================
+# HF_API_TOKEN is optional for local dev (NullProvider is used when unset).
+# Never commit a real token. Set this only in your local .env file.
+HF_API_TOKEN = config("HF_API_TOKEN", default="")
+HF_MODEL_ID = config("HF_MODEL_ID", default="unitary/toxic-bert")
+HF_API_TIMEOUT = config("HF_API_TIMEOUT", default=5, cast=int)
+HF_MAX_INPUT_LENGTH = config("HF_MAX_INPUT_LENGTH", default=512, cast=int)
+
+# Free Provider 1: Local On-Device Transformers (100% Free, Offline, No Keys)
+LOCAL_MODEL_ID = config("LOCAL_MODEL_ID", default="unitary/toxic-bert")
+
+# Free Provider 2: Google Gemini (Free Cloud Tier: 15 req/min, 1500 req/day)
+GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
+GEMINI_MODEL_ID = config("GEMINI_MODEL_ID", default="gemini-3.8-flash")
+GEMINI_API_TIMEOUT = config("GEMINI_API_TIMEOUT", default=15, cast=int)
+
+# Number of recent messages to include as conversational context in Layer 3.
+# Bounded to prevent large payloads. Must be > 0.
+CONTEXT_WINDOW_SIZE = config("CONTEXT_WINDOW_SIZE", default=5, cast=int)
+
+# ==================================================
+# Moderation Policy Engine Thresholds
+# ==================================================
+# Thresholds are in [0.0, 1.0]. Configurable so they can be tuned without
+# code changes. Sarcasm alone never triggers a block regardless of thresholds.
+POLICY_TOXICITY_BLOCK = config("POLICY_TOXICITY_BLOCK", default=0.85, cast=float)
+POLICY_THREAT_BLOCK = config("POLICY_THREAT_BLOCK", default=0.80, cast=float)
+POLICY_HARASSMENT_BLOCK = config("POLICY_HARASSMENT_BLOCK", default=0.80, cast=float)
+POLICY_REVIEW_THRESHOLD = config("POLICY_REVIEW_THRESHOLD", default=0.60, cast=float)
+
+# ==================================================
 # Vosk Speech Recognition Model
 # ==================================================
 VOSK_MODEL_PATH = BASE_DIR / "models" / "vosk-model-small-en-us-0.15"

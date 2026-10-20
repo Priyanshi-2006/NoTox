@@ -111,7 +111,8 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
 
         # Run 3-stage moderation pipeline: Keyword -> Bloom -> Provider
         pipeline = get_moderation_pipeline()
-        mod_result = await pipeline.evaluate(self.user, message)
+        context = await self._get_context(pipeline.context_window_size)
+        mod_result = await pipeline.evaluate(self.user, message, context=context)
 
         if mod_result.is_blocked:
             # Layer 1 instant block or Layer 3 block: same payload plus a generated id
@@ -172,6 +173,17 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             logger.debug("Asynchronous bloom audit error: %s", exc)
 
     @database_sync_to_async
+    def _get_context(self, window_size: int):
+        """
+        Fetch a bounded slice of recent messages for contextual analysis.
+        Uses ChatService.get_messages() which already excludes blocked messages.
+        Returns a list of plain text strings (most recent last).
+        Context is treated as untrusted user content by the provider.
+        """
+        messages = ChatService.get_messages(limit=window_size)
+        return [str(m.content) for m in messages]
+
+    @database_sync_to_async
     def persist_message(self, user, content: str):
         return ChatService.save_message(sender=user, content=content)
 
@@ -195,4 +207,4 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             "username": event["username"],
             "display_name": event["display_name"],
             "created_at": event["created_at"],
-        }))
+        }))

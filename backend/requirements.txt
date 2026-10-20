@@ -26,3 +26,6 @@ better-profanity==0.7.0
 
 # Speech recognition
 vosk>=0.3.45
+
+# Async HTTP client for HuggingFace Inference API (Layer 3 contextual provider)
+httpx>=0.27.0
