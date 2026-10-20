@@ -47,7 +47,7 @@ export default function Register() {
     try {
       await register(form);
       setSuccess(true);
-      setTimeout(() => navigate("/dashboard", { replace: true }), 600);
+      setTimeout(() => navigate("/chat", { replace: true }), 600);
     } catch (err) {
       setApiError(getErrorMessage(err));
     } finally {
@@ -72,7 +72,7 @@ export default function Register() {
         )}
         {success && (
           <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700">
-            Account created! Redirecting to your dashboard...
+            Account created! Redirecting to your Global Chat...
           </div>
         )}
 
@@ -144,11 +144,10 @@ function Field({ label, name, value, onChange, error, type = "text", ...rest }) 
         type={type}
         value={value}
         onChange={onChange}
-        className={`w-full rounded-lg border px-4 py-2 focus:outline-none focus:ring-1 ${
-          error
-            ? "border-red-400 focus:border-red-500 focus:ring-red-500"
-            : "border-slate-300 focus:border-brand-500 focus:ring-brand-500"
-        }`}
+        className={`w-full rounded-lg border px-4 py-2 focus:outline-none focus:ring-1 ${error
+          ? "border-red-400 focus:border-red-500 focus:ring-red-500"
+          : "border-slate-300 focus:border-brand-500 focus:ring-brand-500"
+          }`}
         {...rest}
       />
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
