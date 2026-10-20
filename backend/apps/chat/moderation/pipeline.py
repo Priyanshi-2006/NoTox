@@ -2,19 +2,36 @@
 Three-stage moderation pipeline:
 Layer 1: Keyword filter
 Layer 2: Bloom filter pre-check
-Layer 3: AI moderation provider
+Layer 3: AI moderation provider (with optional contextual analysis)
+
+The policy engine converts Layer 3 ContextualResult scores into a final
+verdict (allow / flagged / blocked) using configurable thresholds.
+
+Design invariants preserved:
+- Fast-path eligibility rules are unchanged.
+- Bloom filter safety guarantees are unchanged.
+- Audit sampling behaviour is unchanged.
+- Provider is only called for uncertain messages.
+- Contextual analysis is only invoked for contextual-capable providers.
+- Sarcasm alone never triggers a block.
+- Low-confidence inferences do not modify trust scores.
 """
 
 import logging
+import math
 import random
 import re
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 from django.conf import settings
 
-from apps.chat.moderation.providers import BaseModerationProvider, get_moderation_provider
+from apps.chat.moderation.providers import (
+    BaseModerationProvider,
+    ContextualResult,
+    get_moderation_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +81,7 @@ class ModerationMetrics:
         self.audit_samples: int = 0
         self.audit_disagreements: int = 0
         self.bloom_failures: int = 0
+        self.contextual_analyses: int = 0
         self._last_bloom_failure_log: float = 0.0
 
     def record_bloom_failure(self, err_msg: str):
@@ -88,6 +106,7 @@ class ModerationMetrics:
             "audit_samples": self.audit_samples,
             "audit_disagreements": self.audit_disagreements,
             "bloom_failures": self.bloom_failures,
+            "contextual_analyses": self.contextual_analyses,
         }
 
     def reset(self):
@@ -99,7 +118,111 @@ class ModerationMetrics:
         self.audit_samples = 0
         self.audit_disagreements = 0
         self.bloom_failures = 0
+        self.contextual_analyses = 0
         self._last_bloom_failure_log = 0.0
+
+
+class ModerationPolicyEngine:
+    """
+    Converts a ContextualResult (produced by Layer 3) into a final verdict.
+
+    The policy engine is the single place where score thresholds are
+    applied.  All thresholds are configurable via Django settings so they
+    can be tuned without code changes.
+
+    Rules (applied in priority order):
+    1. If the provider failed, preserve the existing fail-safe
+       (allow, but log the failure).
+    2. If threat_score >= POLICY_THREAT_BLOCK → BLOCK.
+    3. If toxicity_score >= POLICY_TOXICITY_BLOCK → BLOCK.
+    4. If harassment_score >= POLICY_HARASSMENT_BLOCK → BLOCK.
+    5. If insult_score >= POLICY_HARASSMENT_BLOCK → BLOCK.
+    6. If any score is in [POLICY_REVIEW_THRESHOLD, block_threshold) → REVIEW.
+    7. Sarcasm alone never triggers a block (only informs reason_codes).
+    8. Otherwise → ALLOW.
+    """
+
+    def __init__(
+        self,
+        toxicity_block: Optional[float] = None,
+        threat_block: Optional[float] = None,
+        harassment_block: Optional[float] = None,
+        review_threshold: Optional[float] = None,
+    ):
+        self.toxicity_block = (
+            toxicity_block
+            if toxicity_block is not None
+            else float(getattr(settings, "POLICY_TOXICITY_BLOCK", 0.85))
+        )
+        self.threat_block = (
+            threat_block
+            if threat_block is not None
+            else float(getattr(settings, "POLICY_THREAT_BLOCK", 0.80))
+        )
+        self.harassment_block = (
+            harassment_block
+            if harassment_block is not None
+            else float(getattr(settings, "POLICY_HARASSMENT_BLOCK", 0.80))
+        )
+        self.review_threshold = (
+            review_threshold
+            if review_threshold is not None
+            else float(getattr(settings, "POLICY_REVIEW_THRESHOLD", 0.60))
+        )
+
+    def _finite(self, score: float) -> bool:
+        return not math.isnan(score) and not math.isinf(score)
+
+    def decide(self, ctx: ContextualResult) -> tuple:
+        """
+        Returns (verdict, reason) where:
+        - verdict is "allowed", "blocked", or "flagged"
+        - reason is a human-readable string for logging
+        """
+        if ctx.provider_failed:
+            # Provider failure: do not block based on uncertainty.
+            return "allowed", "provider_failed_fail_safe:" + ",".join(ctx.reason_codes)
+
+        reason_parts = list(ctx.reason_codes)
+
+        # Rule 2: threat
+        if self._finite(ctx.threat_score) and ctx.threat_score >= self.threat_block:
+            return "blocked", "policy_threat_block:" + ",".join(reason_parts)
+
+        # Rule 3: toxicity
+        if self._finite(ctx.toxicity_score) and ctx.toxicity_score >= self.toxicity_block:
+            return "blocked", "policy_toxicity_block:" + ",".join(reason_parts)
+
+        # Rule 4: harassment
+        if (
+            self._finite(ctx.harassment_score)
+            and ctx.harassment_score >= self.harassment_block
+        ):
+            return "blocked", "policy_harassment_block:" + ",".join(reason_parts)
+
+        # Rule 5: insult (same threshold as harassment)
+        if (
+            self._finite(ctx.insult_score)
+            and ctx.insult_score >= self.harassment_block
+        ):
+            return "blocked", "policy_insult_block:" + ",".join(reason_parts)
+
+        # Rule 6: review (any score in amber zone)
+        scores_to_check = [
+            ctx.toxicity_score, ctx.threat_score,
+            ctx.harassment_score, ctx.insult_score,
+        ]
+        in_amber = any(
+            self._finite(s) and s >= self.review_threshold
+            for s in scores_to_check
+        )
+        if in_amber:
+            # If only sarcasm pushed it over and confidence is low, stay at review.
+            return "flagged", "policy_review:" + ",".join(reason_parts)
+
+        # Rule 7: sarcasm alone → never block, never automatically flag.
+        # Rule 8: allow.
+        return "allowed", "policy_allow:" + ",".join(reason_parts)
 
 
 class ModerationPipeline:
@@ -115,6 +238,8 @@ class ModerationPipeline:
         max_length: Optional[int] = None,
         audit_rate: Optional[float] = None,
         metrics: Optional[ModerationMetrics] = None,
+        policy_engine: Optional[ModerationPolicyEngine] = None,
+        context_window_size: Optional[int] = None,
     ):
         self._bloom_backend = bloom_backend
         self.provider = provider or get_moderation_provider()
@@ -134,6 +259,12 @@ class ModerationPipeline:
             else getattr(settings, "BLOOM_AUDIT_RATE", 0.05)
         )
         self.metrics = metrics or ModerationMetrics()
+        self.policy_engine = policy_engine or ModerationPolicyEngine()
+        self.context_window_size = (
+            context_window_size
+            if context_window_size is not None
+            else int(getattr(settings, "CONTEXT_WINDOW_SIZE", 5))
+        )
 
     @property
     def bloom_backend(self):
@@ -153,7 +284,7 @@ class ModerationPipeline:
 
     def is_eligible_for_fast_path(self, user, text: str, has_toxic_hit: bool) -> tuple[bool, str]:
         """
-        Fast-path eligibility. 'Clean' is only honoured if all of these hold:
+        Fast-path eligibility.  'Clean' is only honoured if all of these hold:
         1. No toxic-set hit.
         2. trust_score >= BLOOM_MIN_TRUST.
         3. No URL.
@@ -179,7 +310,59 @@ class ModerationPipeline:
 
         return True, "fast_path_clean"
 
-    async def evaluate(self, user, text: str) -> ModerationResult:
+    def _supports_contextual(self) -> bool:
+        """
+        Returns True when the current provider overrides evaluate_contextual
+        beyond the base-class stub (i.e. it has real contextual analysis).
+        """
+        from apps.chat.moderation.providers import (
+            GeminiProvider,
+            HuggingFaceProvider,
+            LocalTransformerProvider,
+            MockProvider,
+        )
+        return isinstance(
+            self.provider,
+            (HuggingFaceProvider, LocalTransformerProvider, GeminiProvider, MockProvider),
+        )
+
+    async def _run_contextual_analysis(
+        self,
+        user,
+        text: str,
+        context: Optional[List[str]],
+    ) -> tuple:
+        """
+        Run evaluate_contextual() and apply the policy engine.
+        Returns (verdict, reason) strings.
+
+        Errors are contained here; the pipeline's fail-safe (allow on failure)
+        is handled by ContextualResult.provider_failed.
+        """
+        try:
+            ctx: ContextualResult = await self.provider.evaluate_contextual(
+                user, text, context
+            )
+            self.metrics.contextual_analyses += 1
+        except Exception as exc:
+            logger.warning(
+                "Contextual analysis raised unexpectedly: %s", exc
+            )
+            from apps.chat.moderation.providers import _safe_contextual_result
+            ctx = _safe_contextual_result(
+                provider_failed=True,
+                reason_codes=["contextual_exception"],
+            )
+
+        verdict, reason = self.policy_engine.decide(ctx)
+        return verdict, reason
+
+    async def evaluate(
+        self,
+        user,
+        text: str,
+        context: Optional[List[str]] = None,
+    ) -> ModerationResult:
         start_time = time.perf_counter()
         self.metrics.total_evaluated += 1
 
@@ -241,16 +424,30 @@ class ModerationPipeline:
         self.metrics.layer2_uncertain += 1
         self.metrics.layer3_provider_calls += 1
 
-        provider_result = await self.provider.evaluate(user, text)
-        latency = (time.perf_counter() - start_time) * 1000.0
-
-        return ModerationResult(
-            stage="provider",
-            verdict=provider_result.verdict,
-            bloom_status="uncertain",
-            latency_ms=latency,
-            reason=f"provider_eval: {provider_result.reason or reason}",
-        )
+        if self._supports_contextual():
+            # Use the richer contextual path with policy engine.
+            verdict, policy_reason = await self._run_contextual_analysis(
+                user, text, context
+            )
+            latency = (time.perf_counter() - start_time) * 1000.0
+            return ModerationResult(
+                stage="provider",
+                verdict=verdict,
+                bloom_status="uncertain",
+                latency_ms=latency,
+                reason=f"contextual_policy: {policy_reason}",
+            )
+        else:
+            # Existing path: basic provider.evaluate() (NullProvider, etc.)
+            provider_result = await self.provider.evaluate(user, text)
+            latency = (time.perf_counter() - start_time) * 1000.0
+            return ModerationResult(
+                stage="provider",
+                verdict=provider_result.verdict,
+                bloom_status="uncertain",
+                latency_ms=latency,
+                reason=f"provider_eval: {provider_result.reason or reason}",
+            )
 
 
 _default_pipeline: Optional[ModerationPipeline] = None
