@@ -3,10 +3,9 @@ from rest_framework.permissions import BasePermission
 
 class IsAdminRole(BasePermission):
     """
-    Checks the application-level `role` field, not Django's is_staff.
-    Not used by any Stage 1 endpoint yet — this is the extension point
-    the admin dashboard stage will import instead of re-deriving its
-    own role check.
+    Checks the application-level `role` field, not Django's `is_staff`.
+    Not currently used by any endpoint. This permission can be applied
+    to future admin-only API endpoints when required.
     """
 
     message = "This action requires an admin role."

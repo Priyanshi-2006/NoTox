@@ -140,7 +140,7 @@ notox/
 │   ├── src/
 │   │   ├── components/              # Navbar, ProtectedRoute, LoadingSpinner
 │   │   ├── context/                 # AuthContext (state & tokens)
-│   │   ├── pages/                   # GlobalChat, Dashboard, Profile, GoLive, Watch, Login, Register
+│   │   ├── pages/                   # GlobalChat, Profile, GoLive, Watch, Login, Register
 │   │   └── services/                # Axios API client, streamService, WebSocket handlers
 │   └── package.json
 └── docs/
@@ -169,7 +169,7 @@ notox/
 - **User Profiles:** Safe fields (`display_name`, `bio`, `avatar`, `phone_number`, `role`).
 - **Role-Based Access Control:** Reusable permissions for `User`, `Moderator`, and `Admin`.
 - **Trust Score Engine:** Standardized range ($0 - 100$, default $100$) with `TrustScoreService` mutation helpers.
-- **Interactive UI:** Live profile dashboard with avatar preview and trust score meter.
+- **Profile UI:** User profile page with avatar preview and trust score display.
 </details>
 
 <details open>
