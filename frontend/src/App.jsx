@@ -2,7 +2,6 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import MainLayout from "./layouts/MainLayout.jsx";
-import Dashboard from "./pages/Dashboard.jsx";
 import GlobalChat from "./pages/GlobalChat.jsx";
 import GoLive from "./pages/GoLive.jsx";
 import Login from "./pages/Login.jsx";
@@ -19,15 +18,6 @@ export default function App() {
 
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
 
         <Route
           path="/chat"

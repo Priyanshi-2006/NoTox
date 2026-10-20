@@ -24,9 +24,6 @@ export default function Navbar() {
         <div className="flex items-center gap-6 text-sm font-medium text-slate-600">
           {isAuthenticated ? (
             <>
-              <Link to="/dashboard" className="hover:text-brand-600">
-                Dashboard
-              </Link>
 
               <Link to="/chat" className="hover:text-brand-600">
                 Global Chat
