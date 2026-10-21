@@ -11,8 +11,9 @@ from better_profanity import profanity
 
 from apps.chat.moderation.bloom import BaseBloomBackend, RedisBloomBackend, get_bloom_backend
 
-# Ensure default profanity word list is loaded
-profanity.load_censor_words()
+# Ensure default profanity word list is loaded if not already initialized
+if not getattr(profanity, "CENSOR_WORDSET", None):
+    profanity.load_censor_words()
 
 EXTRAS_FILE = Path(__file__).resolve().parent / "data" / "extras.txt"
 
@@ -37,6 +38,13 @@ def load_seed_tokens() -> List[str]:
                 if not line or line.startswith("#"):
                     continue
                 tokens.add(line.lower())
+
+    # 3. Contextual sensitive tokens that must be caught by Layer 2 Bloom
+    # and routed to Layer 3 (Gemini / AI) for semantic interpretation
+    SENSITIVE_CONTEXTUAL_TOKENS = {
+        "kill", "killed", "killing", "kills", "killer", "murder", "threat", "die", "death"
+    }
+    tokens.update(SENSITIVE_CONTEXTUAL_TOKENS)
 
     return sorted(tokens)
 

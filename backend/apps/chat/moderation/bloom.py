@@ -93,6 +93,22 @@ class LocalBloomBackend(BaseBloomBackend):
         self._bitarray = bytearray(self._num_bytes)
         self._count = 0
         self._lock = asyncio.Lock()
+        self._auto_seed()
+
+    def _auto_seed(self):
+        # Only auto-seed production-sized filters (default capacity=50,000);
+        # isolated unit tests specify tiny capacities like 1,000 and seed their own items.
+        if self.capacity < 20000:
+            return
+        try:
+            from apps.chat.moderation.seed import load_seed_tokens
+            tokens = load_seed_tokens()
+            for token in tokens:
+                for idx in self._get_hash_indices(token):
+                    self._bitarray[idx >> 3] |= (1 << (idx & 7))
+            self._count = len(tokens)
+        except Exception as exc:
+            logger.debug("LocalBloomBackend auto-seed deferred: %s", exc)
 
     @property
     def item_count(self) -> int:
