@@ -902,11 +902,34 @@ class GeminiProvider(BaseModerationProvider):
 
     def _call_gemini_sync(self, prompt: str) -> str:
         client = self._get_client()
-        response = client.models.generate_content(
-            model=self.model_id,
-            contents=prompt,
-        )
-        return response.text
+        # Primary model plus fallbacks in case of temporary 503 high demand spikes or deprecation
+        models_to_try = [self.model_id]
+        fallbacks = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-latest"]
+        for fb in fallbacks:
+            if fb not in models_to_try:
+                models_to_try.append(fb)
+
+        last_error = None
+        for model_name in models_to_try:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                if response and response.text:
+                    return response.text
+            except Exception as exc:
+                last_error = exc
+                err_str = str(exc)
+                if "503" in err_str or "404" in err_str or "high demand" in err_str.lower():
+                    logger.warning(
+                        "Gemini model %r unavailable (%s), trying fallback...",
+                        model_name,
+                        exc,
+                    )
+                    continue
+                raise exc
+        raise last_error or RuntimeError("All Gemini models failed")
 
     async def evaluate_contextual(
         self,
@@ -924,7 +947,25 @@ class GeminiProvider(BaseModerationProvider):
         start = time.perf_counter()
         context_str = "\n".join(f"- {c}" for c in context[-5:]) if context else "(no context)"
         prompt = (
-            "You are a strict chat moderation classifier. Analyze this chat message in context:\n\n"
+            "You are a nuanced chat moderation classifier. Your task is to detect GENUINE harm "
+            "(direct threats, targeted harassment, hate speech, slurs) \xe2\x80\x94 NOT to flag casual "
+            "language, compliments, idioms, or figurative speech.\n\n"
+            "CRITICAL RULES \xe2\x80\x94 read carefully before scoring:\n"
+            "1. INTENT matters more than individual words. A word that can be offensive in one "
+            "context may be completely benign in another.\n"
+            "2. Profanity used as an INTENSIFIER or COMPLIMENT is NOT harmful:\n"
+            "   - 'you are fucking gorgeous' -> toxicity=0.0, insult=0.0 (compliment + intensifier)\n"
+            "   - 'that was fucking amazing' -> toxicity=0.0 (enthusiastic praise)\n"
+            "   - 'she is a badass' -> toxicity=0.0 (compliment)\n"
+            "3. FIGURATIVE / IDIOMATIC language is NOT a threat:\n"
+            "   - 'you killed the vibe' -> threat=0.0 (idiom: dampened the mood)\n"
+            "   - 'she killed it on stage' -> threat=0.0 (idiom: performed brilliantly)\n"
+            "   - 'this song is killing me' -> threat=0.0 (figurative: very moving)\n"
+            "4. Only score HIGH when there is a DIRECT, TARGETED harmful action:\n"
+            "   - 'I will kill you' -> threat=0.95 (direct personal threat)\n"
+            "   - 'fuck you' -> toxicity=0.85, insult=0.85 (direct attack)\n"
+            "   - 'you are worthless trash' -> harassment=0.9, insult=0.9\n"
+            "5. Consider the PRECEDING CONVERSATION for full context before scoring.\n\n"
             f"Preceding conversation:\n{context_str}\n\n"
             f"Current message to evaluate:\n\"{text}\"\n\n"
             "Respond ONLY with a valid JSON object (no markdown, no extra text) containing:\n"
